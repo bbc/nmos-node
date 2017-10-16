@@ -28,7 +28,7 @@ from nmoscommon.utils import get_node_id
 from socket import gethostname, getfqdn
 from api import FacadeAPI
 from registry import FacadeRegistry, FacadeRegistryCleaner, legalise_resource
-#from serviceinterface import FacadeInterface
+from serviceinterface import FacadeInterface
 from os import getpid
 from subprocess import check_output
 
@@ -44,7 +44,7 @@ from nmoscommon import ptptime
 from nmoscommon import nmoscommonconfig
 import socket
 
-from mock_service import MockBackend
+# from mock_service import MockBackend
 
 NS = 'urn:x-bbcrd:ips:ns:0.1'
 PORT = 12345
@@ -178,8 +178,8 @@ class NodeFacadeService:
             self.httpServer.started.wait()
 
 
-        #self.interface = FacadeInterface(self.registry, self.logger)
-        #self.interface.start()
+        self.interface = FacadeInterface(self.registry, self.logger)
+        self.interface.start()
 
         if self.httpServer.failed is not None:
             raise self.httpServer.failed
@@ -197,7 +197,7 @@ class NodeFacadeService:
         pidfile = "/tmp/ips-nodefacade.pid"
         file(pidfile, 'w').write(str(getpid()))
         self.start()
-        test_backend = MockBackend(self.registry)
+        # test_backend = MockBackend(self.registry)
         while self.running:
             self.registry.update_ptp()
             time.sleep(1)
@@ -218,7 +218,7 @@ class NodeFacadeService:
                 self.logger.writeWarning("Could not stop mdns: {}".format(e))
 
         self.registry_cleaner.stop()
-        #self.interface.stop()
+        self.interface.stop()
         self.httpServer.stop()
         self.aggregator.stop()
         self.logger.writeInfo("Stopped main()")
