@@ -1,6 +1,6 @@
 # NMOS Node API
 
-Package providing a basic NMOS Node API implementation. It takes the form of a "Node Facade" which accepts data from private back-end data providers. The version of the service on this branch runs a "mock" service that presents a faked node on the API. Users wishing to use the API without this should use the Master branch.
+Package providing a basic NMOS Node API implementation. It takes the form of a "Node Facade" which accepts data from private back-end data providers.
 
 ## Installing with Python
 
