@@ -460,21 +460,12 @@ class FacadeRegistry(object):
         return self.preprocess_resource("node", self.node_data["id"], self.node_data, api_version)
 
     def update_ptp(self):
-        sts = IppClock().PTPStatus()
         do_update = False
         for clk in self.node_data['clocks']:
             if "ref_type" in clk and clk["ref_type"] == "ptp":
-                old_clk = copy.copy(clk)
-                if len(sts.keys()) > 0:
-                    clk['traceable'] = sts['timeTraceable']
-                    clk['gmid'] = sts['grandmasterClockIdentity'].lower()
-                    clk['locked'] = (sts['ofm'][0] == 0)
-                else:
-                    clk['traceable'] = False
-                    clk['gmid'] = '00-00-00-00-00-00-00-00'
-                    clk['locked'] = False
-                if clk != old_clk:
-                    do_update = True
+                clk['traceable'] = False
+                clk['gmid'] = '00-00-00-00-00-00-00-00'
+                clk['locked'] = False
         if do_update:
             self.update_node()
 

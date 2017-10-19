@@ -53,7 +53,7 @@ FQDN = getfqdn()
 # enabled = Use HTTPS only in all URLs and mDNS adverts
 # disabled = Use HTTP only in all URLs and mDNS adverts
 # mixed = Use HTTP in all URLs, but additionally advertise an HTTPS endpoint for discovery of this API only
-HTTPS_MODE = ipppythonconfig.config.get('https_mode','disabled')
+HTTPS_MODE = 'disabled'
 
 def updateHost () :
     if nmoscommonconfig.config.get('prefer_ipv6',False) == False:
