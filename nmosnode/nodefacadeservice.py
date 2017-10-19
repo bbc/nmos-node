@@ -49,6 +49,12 @@ PORT = 12345
 HOSTNAME = gethostname().split(".", 1)[0]
 FQDN = getfqdn()
 
+# HTTPS under test only at present
+# enabled = Use HTTPS only in all URLs and mDNS adverts
+# disabled = Use HTTP only in all URLs and mDNS adverts
+# mixed = Use HTTP in all URLs, but additionally advertise an HTTPS endpoint for discovery of this API only
+HTTPS_MODE = ipppythonconfig.config.get('https_mode','disabled')
+
 def updateHost () :
     if nmoscommonconfig.config.get('prefer_ipv6',False) == False:
         return getLocalIP()
