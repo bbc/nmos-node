@@ -162,33 +162,5 @@ class TestRegistry(unittest.TestCase):
         expected_args = ('flow', 'register')
         self.assertEqual(self.mock_mdns_updater.update_mdns_invocations, [expected_args])
 
-    def test_register_timeline(self):
-        seg_id = "flow_a/store_a/2014-05-23T16:53:55.000000234"
-        res = {"label": "test_segment"}
-        self.registry.register_to_timeline("a", 1, "flowsegment", seg_id, res)
-        actual = self.registry.services['a']['timeline']
-        expected = {
-            'flowsegment': {
-                seg_id: {
-                    'label': 'test_segment',
-                    'max_api_version': 'v1.0'
-                }
-            }
-        }
-        self.assertDictEqual(expected, actual)
-        self.assertEqual(self.mock_aggregator.register_invocations,
-                [[('timeline', "flowsegment", seg_id),
-                {'label': 'test_segment', 'max_api_version': 'v1.0'}]])
-
-    def test_unregister_timeline(self):
-        seg_id = "flow_a/store_a/2014-05-23T16:53:55.000000234"
-        res = {"label": "test_segment"}
-        self.registry.register_to_timeline("a", 1, "flowsegment", seg_id, res)
-        self.registry.unregister_from_timeline("a", 1, "flowsegment", seg_id)
-        actual = self.registry.services['a']['timeline']
-        self.assertDictEqual({'flowsegment': {}}, actual)
-        self.assertEqual(self.mock_aggregator.unregister_invocations,
-            [[('timeline', "flowsegment", seg_id), {}]])
-
 if __name__ == '__main__':
     unittest.main()

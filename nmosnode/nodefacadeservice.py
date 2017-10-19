@@ -44,8 +44,6 @@ from nmoscommon import ptptime
 from nmoscommon import nmoscommonconfig
 import socket
 
-# from mock_service import MockBackend
-
 NS = 'urn:x-bbcrd:ips:ns:0.1'
 PORT = 12345
 HOSTNAME = gethostname().split(".", 1)[0]
@@ -67,15 +65,15 @@ class NodeFacadeService:
             sys.exit(1)
         self.running          = False
         self.httpServer       = None
+        self.interface        = None
         self.interactive      = interactive
-        self.interface = None
         self.registry         = None
         self.registry_cleaner = None
         self.node_id          = None
         self.mdns             = MDNSEngine()
         self.mdnsname_suffix  = '_' + str(HOSTNAME) + "_" + str(getpid())
         self.mappings         = {"device": "ver_dvc", "flow": "ver_flw", "source": "ver_src", "sender":"ver_snd", "receiver":"ver_rcv", "self":"ver_slf"}
-        self.mdns_updater     = MDNSUpdater(self.mdns, "_nmos-node._tcp", "node" + self.mdnsname_suffix, self.mappings, PORT, self.logger, txt_recs={"api_ver": "v1.0", "api_proto": "http"})
+        self.mdns_updater     = MDNSUpdater(self.mdns, "_nmos-node._tcp", "node" + self.mdnsname_suffix, self.mappings, PORT, self.logger, txt_recs={"api_ver": "v1.0,v1.1,v1.2", "api_proto": "http"})
         self.aggregator       = Aggregator(self.logger, self.mdns_updater)
 
     def sig_handler(self):
@@ -85,10 +83,32 @@ class NodeFacadeService:
     def sig_hup_handler(self):
         if getLocalIP() != "":
             HOST = updateHost()
-            self.registry.modify_node(href='http://{}/'.format(HOST),
+            self.registry.modify_node(href=self.generate_href(),
                                       host=HOST,
-                                      api={"versions": NODE_APIVERSIONS, "endpoints":[{"host" : HOST, "port" : 80, "protocol" : "http"}]},
+                                      api={"versions": NODE_APIVERSIONS, "endpoints": self.generate_endpoints()},
                                       interfaces=self.list_interfaces())
+
+    def generate_endpoints(self):
+        endpoints = []
+        if HTTPS_MODE != "enabled":
+            endpoints.append({
+                "host" : HOST,
+                "port" : 80, #Everything should go via apache proxy
+                "protocol" : "http"
+            })
+        if HTTPS_MODE != "disabled":
+            endpoints.append({
+                "host" : HOST,
+                "port" : 443, #Everything should go via apache proxy
+                "protocol" : "https"
+            })
+        return endpoints
+
+    def generate_href(self):
+        if HTTPS_MODE == "enabled":
+            return "https://{}/".format(HOST)
+        else:
+            return "http://{}/".format(HOST)
 
     def list_interfaces(self):
         interfaces = {}
@@ -100,23 +120,27 @@ class NodeFacadeService:
                     address_path = net_path + interface_name + "/address"
                     if os.path.exists(address_path):
                         address = open(address_path, "r").readline()
-                        interfaces[interface_name] = {"name": interface_name, "chassis_id": None, "port_id": address.lower().strip("\n")}
+                        interfaces[interface_name] = {"name": interface_name, "chassis_id": None, "port_id": address.lower().strip("\n").replace(":", "-")}
 
         # Attempt to source proper LLDP data for interfaces
         if os.path.exists("/usr/sbin/lldpcli"):
             try:
                 chassis_data = json.loads(check_output(["/usr/sbin/lldpcli", "show", "chassis", "-f", "json"]))
                 chassis_id = chassis_data["local-chassis"]['chassis'].values()[0]["id"]["value"]
+                if chassis_data["local-chassis"]['chassis'].values()[0]["id"]["type"] == "mac":
+                    chassis_id = chassis_id.lower().replace(":", "-")
                 interface_data = json.loads(check_output(["/usr/sbin/lldpcli", "show", "statistics", "-f", "json"]))
                 if isinstance(interface_data["lldp"]["interface"], dict):
                     for interface_name in interface_data["lldp"]["interface"].keys():
                         if interface_name in interfaces:
-                            interfaces[interface_name] = {"name": interface_name, "chassis_id": chassis_id, "port_id": interface_name}
+                            # Only correct the Chassis ID. Port ID MUST be a MAC address
+                            interfaces[interface_name]["chassis_id"] = chassis_id
                 else:
                     for interface_block in interface_data["lldp"]["interface"]:
                         interface_name = interface_block.keys()[0]
                         if interface_name in interfaces:
-                            interfaces[interface_name] = {"name": interface_name, "chassis_id": chassis_id, "port_id": interface_name}
+                            # Only correct the Chassis ID. Port ID MUST be a MAC address
+                            interfaces[interface_name]["chassis_id"] = chassis_id
             except Exception:
                 pass
 
@@ -135,7 +159,7 @@ class NodeFacadeService:
                       "label": FQDN,
                       "description" : "Node on {}".format(FQDN),
                       "tags" : {},
-                      "href": 'http://{}/'.format(HOST),
+                      "href": self.generate_href(),
                       "host": HOST,
                       "services": [],
                       "hostname": HOSTNAME,
@@ -143,13 +167,7 @@ class NodeFacadeService:
                       "version": node_version,
                       "api" : {
                           "versions" : NODE_APIVERSIONS,
-                          "endpoints" : [
-                                 {
-                                     "host" : HOST,
-                                     "port" : 80, #Everything should go via apache proxy
-                                     "protocol" : "http"
-                                 },
-                          ],
+                          "endpoints" : self.generate_endpoints(),
                       },
                       "clocks" : [
                              {
@@ -177,10 +195,6 @@ class NodeFacadeService:
             self.logger.writeInfo('Waiting for httpserver to start...')
             self.httpServer.started.wait()
 
-
-        self.interface = FacadeInterface(self.registry, self.logger)
-        self.interface.start()
-
         if self.httpServer.failed is not None:
             raise self.httpServer.failed
 
@@ -192,12 +206,14 @@ class NodeFacadeService:
         except Exception as e:
             self.logger.writeWarning("Could not register: {}".format(e.__repr__()))
 
+        self.interface = FacadeInterface(self.registry, self.logger)
+        self.interface.start()
+
     def run(self):
         self.running = True
         pidfile = "/tmp/ips-nodefacade.pid"
         file(pidfile, 'w').write(str(getpid()))
         self.start()
-        # test_backend = MockBackend(self.registry)
         while self.running:
             self.registry.update_ptp()
             time.sleep(1)

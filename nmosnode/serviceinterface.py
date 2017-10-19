@@ -56,6 +56,7 @@ class FacadeInterface(object):
         self.logger.writeInfo("Service Register {}, {}, {}, {}, {}".format(name, srv_type, pid, href, proxy_path))
         return self.registry.register_service(name, srv_type, pid, href, proxy_path)
 
+    #TODO: =None should be removed once proxying removed from node facade
     @ipcmethod
     def srv_update(self, name, pid, href, proxy_path):
         self.logger.writeInfo("Service Update {}, {}, {}, {}".format(name, pid, href, proxy_path))
@@ -87,19 +88,14 @@ class FacadeInterface(object):
         return self.registry.unregister_resource(name, pid, type, key)
 
     @ipcmethod
-    def timeline_register(self, name, pid, type, key, value):
-        self.logger.writeInfo("Timeline Register {} {} {} {} {}".format(name, pid, type, key, value))
-        return self.registry.register_to_timeline(name, pid, type, key, value)
+    def control_register(self, name, pid, device_id, control_data):
+        self.logger.writeInfo("Control Register {} {} {} {}".format(name, pid, device_id, control_data))
+        return self.registry.register_control(name, pid, device_id, control_data)
 
     @ipcmethod
-    def timeline_update(self, name, pid, type, key, value):
-        self.logger.writeInfo("Timeline Update {} {} {} {} {}".format(name, pid, type, key, value))
-        return self.registry.update_timeline(name, pid, type, key, value)
-
-    @ipcmethod
-    def timeline_unregister(self, name, pid, type, key):
-        self.logger.writeInfo("Timeline Unregister {} {} {} {}".format(name, pid, type, key))
-        return self.registry.unregister_from_timeline(name, pid, type, key)
+    def control_unregister(self, name, pid, device_id, control_data):
+        self.logger.writeInfo("Control Unregister {} {} {} {}".format(name, pid, device_id, control_data))
+        return self.registry.unregister_control(name, pid, device_id, control_data)
 
     @ipcmethod
     def self_get(self, name, pid, api_version):

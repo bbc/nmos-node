@@ -172,7 +172,7 @@ def legalise_resource(res, rtype, api_version):
     legalkeys[("source", "v1.2")] = ( legalkeys[("source", "v1.1")] )
     legalkeys[("flow", "v1.2")] = ( legalkeys[("flow", "v1.1")] )
     legalkeys[("sender", "v1.2")] = ( legalkeys[("sender", "v1.1")] +
-                                      ["interface_bindings"] )
+                                      ["interface_bindings", "subscription"] )
     legalkeys[("receiver", "v1.2")] = ( legalkeys[("receiver", "v1.1")] +
                                         ["interface_bindings"] )
     # v1.2 ends
@@ -183,7 +183,18 @@ def legalise_resource(res, rtype, api_version):
     retval = dict()
     for key in legalkeys[(rtype, api_version)]:
         if key in res:
-            retval[key] = res[key]
+            retval[key] = copy.deepcopy(res[key])
+
+        # Catch final items inside objects.
+        # Ideally find a better way long term which uses schemas and as such checks missing keys too
+        if rtype == "receiver":
+            if api_version == "v1.0":
+                if "caps" in retval:
+                    retval["caps"] = {}
+            if api_version in ["v1.0", "v1.1"]:
+                if "subscription" in retval:
+                    retval["subscription"].pop("active", None)
+
     return retval
 
 class FacadeRegistry(object):
@@ -211,11 +222,11 @@ class FacadeRegistry(object):
             href = None
             if self.services[service_name]["href"]:
                 if self.services[service_name]["proxy_path"]:
-                    href = "http://{}/{}".format(self.node_data["host"],self.services[service_name]["proxy_path"])
+                    href = self.node_data["href"] + self.services[service_name]["proxy_path"]
             self.node_data["services"].append({"href": href, "type": self.services[service_name]["type"]})
         self.node_data["version"] = str(ptptime.ptp_detail()[0]) + ":" + str(ptptime.ptp_detail()[1])
         try:
-            self.aggregator.register("node", self.node_id, **legalise_resource(self.node_data, "node", NODE_REGVERSION))
+            self.aggregator.register("node", self.node_id, **self.preprocess_resource("node", self.node_data["id"], self.node_data, NODE_REGVERSION))
         except Exception as e:
             self.logger.writeError("Exception re-registering node: {}".format(e))
 
@@ -226,7 +237,7 @@ class FacadeRegistry(object):
         self.services[name] = {
             "heartbeat": time.time(),
             "resource": {},                     # Registered resources live under here
-            "timeline": {"flowsegment": {}},    # Registered "timeline" items live under here
+            "control": {},                      # Registered device controls live under here
             "pid": pid,
             "href": href,
             "proxy_path": proxy_path,
@@ -255,10 +266,13 @@ class FacadeRegistry(object):
             return RES_NOEXISTS
         if self.services[name]["pid"] != pid:
             return RES_UNAUTHORISED
-        for namespace in ["resource", "timeline"]:
+        for namespace in ["resource", "control"]:
             for type in self.services[name][namespace].keys():
                 for key in self.services[name][namespace][type].keys():
-                    self._unregister(name, namespace, pid, type, key)
+                    if namespace == "control":
+                        self._register(name, "control", pid, type, "remove", self.services[name][namespace][type][key])
+                    else:
+                        self._unregister(name, namespace, pid, type, key)
         self.services.pop(name, None)
         self.update_node()
         return RES_SUCCESS
@@ -282,15 +296,16 @@ class FacadeRegistry(object):
             return RES_UNSUPPORTED
         return self._register(service_name, "resource", pid, type, key, value)
 
-    def register_to_timeline(self, service_name, pid, type, key, value):
-        return self._register(service_name, "timeline", pid, type, key, value)
+    def register_control(self, service_name, pid, device_id, control_data):
+        return self._register(service_name, "control", pid, device_id, "add", control_data)
 
     def _register(self, service_name, namespace, pid, type, key, value):
-        if "max_api_version" not in value:
-            self.logger.writeWarning("Service {}: Registration without valid api version specified".format(service_name))
-            value["max_api_version"] = "v1.0"
-        elif api_version_less_than(value["max_api_version"], NODE_REGVERSION):
-            self.logger.writeWarning("Trying to register resource with api version too low: \"%s\" : %s", key, json.dumps(value))
+        if namespace != "control":
+            if "max_api_version" not in value:
+                self.logger.writeWarning("Service {}: Registration without valid api version specified".format(service_name))
+                value["max_api_version"] = "v1.0"
+            elif api_version_less_than(value["max_api_version"], NODE_REGVERSION):
+                self.logger.writeWarning("Trying to register resource with api version too low: '{}' : {}".format(key, json.dumps(value)))
         if not service_name in self.services:
             return RES_NOEXISTS
         if not self.services[service_name]["pid"] == pid:
@@ -302,16 +317,43 @@ class FacadeRegistry(object):
         if type == 'device':
             value['node_id'] = self.node_id
 
-        self.services[service_name][namespace][type][key] = value
+        if namespace == "control":
+            if type not in self.services[service_name][namespace]:
+                # 'type' is the Device ID in this case
+                self.services[service_name][namespace][type] = {}
+
+            if key == "add":
+                # Register
+                self.services[service_name][namespace][type][value["href"]] = value
+            else:
+                # Unregister
+                self.services[service_name][namespace][type].pop(value["href"], None)
+
+            # Reset the parameters below to force re-registration of the corresponding Device
+            namespace = "resource"
+            key = type # Device ID
+            type = "device"
+            value = None
+
+            for name in self.services: # Find the service which registered the Device in question
+                if key in self.services[name]["resource"][type]:
+                    value = self.services[name]["resource"][type][key]
+                    break
+
+            if not value: # Device isn't actually registered at present
+                return RES_SUCCESS
+        else:
+            self.services[service_name][namespace][type][key] = value
 
         # Don't pass non-registration exceptions to clients
         try:
-            self._update_mdns(type)
+            if namespace == "resource":
+                self._update_mdns(type)
         except Exception as e:
             self.logger.writeError("Exception registering with mDNS: {}".format(e))
 
         try:
-            self.aggregator.register_into(namespace, type, key, **legalise_resource(value, type, NODE_REGVERSION))
+            self.aggregator.register_into(namespace, type, key, **self.preprocess_resource(type, key, value, NODE_REGVERSION))
             self.logger.writeDebug("registering {} {}".format(type, key))
         except Exception as e:
             self.logger.writeError("Exception registering {}: {}".format(namespace, e))
@@ -327,16 +369,14 @@ class FacadeRegistry(object):
                 return service_name
         return None
 
-    def update_timeline(self, service_name, pid, type, key, value):
-        return self._register(service_name, "timeline", pid, type, key, value)
-
     def unregister_resource(self, service_name, pid, type, key):
         if not type in self.permitted_resources:
             return RES_UNSUPPORTED
         return self._unregister(service_name, "resource", pid, type, key)
 
-    def unregister_from_timeline(self, service_name, pid, type, key):
-        return self._unregister(service_name, "timeline", pid, type, key)
+    def unregister_control(self, service_name, pid, device_id, control_data):
+        # Note use of register here, as we're updating an existing Device
+        return self._register(service_name, "control", pid, device_id, "remove", control_data)
 
     def _unregister(self, service_name, namespace, pid, type, key):
         if not service_name in self.services:
@@ -345,7 +385,9 @@ class FacadeRegistry(object):
             return RES_UNAUTHORISED
         if key == "00000000-0000-0000-0000-000000000000":
             return RES_OTHERERROR
+
         self.services[service_name][namespace][type].pop(key, None)
+
         # Don't pass non-registration exceptions to clients
         try:
             self.aggregator.unregister_from(namespace, type, key)
@@ -353,7 +395,8 @@ class FacadeRegistry(object):
             self.logger.writeError("Exception unregistering {}: {}".format(namespace, e))
             return RES_OTHERERROR
         try:
-            self._update_mdns(type)
+            if namespace == "resource":
+                self._update_mdns(type)
         except Exception as e:
             extype, exmsg = e
             self.logger.writeError("Exception unregistering from mDNS: {}".format(e))
@@ -377,12 +420,22 @@ class FacadeRegistry(object):
             return RES_NOEXISTS
         return self.services[name]["type"]
 
+    def preprocess_resource(self, type, key, value, api_version="v1.0"):
+        if type == "device":
+            value_copy = copy.deepcopy(value)
+            for name in self.services:
+                if key in self.services[name]["control"] and "controls" in value_copy:
+                    value_copy["controls"] = value_copy["controls"] + self.services[name]["control"][key].values()
+            return legalise_resource(value_copy, type, api_version)
+        else:
+            return legalise_resource(value, type, api_version)
+
     def list_resource(self, type, api_version="v1.0"):
         if not type in self.permitted_resources:
             return RES_UNSUPPORTED
         response = {}
         for name in self.services:
-            response = (dict(response.items() + [ (k, legalise_resource(x, type, api_version))
+            response = (dict(response.items() + [ (k, self.preprocess_resource(type, k, x, api_version))
                                                   for (k,x) in self.services[name]["resource"][type].items()
                                                   if ((api_version == "v1.0") or
                                                       ("max_api_version" in x and
@@ -404,16 +457,22 @@ class FacadeRegistry(object):
             self.mdns_updater.update_mdns(type, "update")
 
     def list_self(self, api_version="v1.0"):
-        return legalise_resource(self.node_data, "node", api_version)
+        return self.preprocess_resource("node", self.node_data["id"], self.node_data, api_version)
 
     def update_ptp(self):
+        sts = IppClock().PTPStatus()
         do_update = False
         for clk in self.node_data['clocks']:
             if "ref_type" in clk and clk["ref_type"] == "ptp":
                 old_clk = copy.copy(clk)
-                clk['traceable'] = False
-                clk['gmid'] = '00-00-00-00-00-00-00-00'
-                clk['locked'] = False
+                if len(sts.keys()) > 0:
+                    clk['traceable'] = sts['timeTraceable']
+                    clk['gmid'] = sts['grandmasterClockIdentity'].lower()
+                    clk['locked'] = (sts['ofm'][0] == 0)
+                else:
+                    clk['traceable'] = False
+                    clk['gmid'] = '00-00-00-00-00-00-00-00'
+                    clk['locked'] = False
                 if clk != old_clk:
                     do_update = True
         if do_update:
