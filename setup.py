@@ -88,11 +88,11 @@ setup(name = "nmosnodefacade",
       scripts = [
                 ],
       data_files=[
-          ('/etc/init',        ['etc/init/nmosnode.conf']),
-          ('/etc/network/if-up.d',        ['etc/network/if-up.d/ZZZnmosnode']),
-          ('/etc/network/if-post-down.d',        ['etc/network/if-post-down.d/ZZZnmosnode']),
-          ('/lib/systemd/system', ['lib/systemd/system/nmosnode.service']),
-          ('/usr/bin', ['bin/nmosnode'])
+          (sys.prefix + '/etc/init',        ['etc/init/nmosnode.conf']),
+          (sys.prefix + '/etc/network/if-up.d',        ['etc/network/if-up.d/ZZZnmosnode']),
+          (sys.prefix + '/etc/network/if-post-down.d',        ['etc/network/if-post-down.d/ZZZnmosnode']),
+          (sys.prefix + '/lib/systemd/system', ['lib/systemd/system/nmosnode.service']),
+          (sys.prefix + '/usr/bin', ['bin/nmosnode'])
       ],
       long_description = """
 Package providing a basic NMOS Node API implementation. The API is provided as a facade which accepts data from private back-end data providers.
