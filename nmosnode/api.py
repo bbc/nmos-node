@@ -23,7 +23,7 @@ from flask import stream_with_context
 from nmoscommon import config as _config
 
 NODE_APIVERSIONS = _config.get('nodefacade', {}).get('NODE_APIVERSIONS', [ "v1.0", "v1.1", "v1.2" ])
-NODE_REGVERSION = _config.get('nodefacade', {}).get('NODE_REGVERSION', 'v1.1')
+NODE_REGVERSION = _config.get('nodefacade', {}).get('NODE_REGVERSION', 'v1.2')
 NODE_APINAMESPACE = "x-nmos"
 NODE_APINAME = "node"
 HOSTNAME = gethostname().split(".", 1)[0]
