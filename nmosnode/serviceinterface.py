@@ -15,7 +15,7 @@
 from nmoscommon.ipc import Host
 from nmoscommon.logger import Logger
 
-ADDRESS="ipc:///tmp/nmos-nodefacade"
+ADDRESS="ipc:///tmp/ips-nodefacade"
 
 def ipcmethod(name=None):
     def decorator(function):
