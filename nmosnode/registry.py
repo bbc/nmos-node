@@ -27,6 +27,15 @@ import json
 
 from nmoscommon import config as _config
 
+try:
+    # Use internal BBC RD ipputils to get PTP if available
+    from pyipputils.ippclock import IppClock
+    clk = IppClock()
+    IPP_UTILS_CLOCK_AVAILABLE = True
+except ImportError:
+    # Library not available, use fallback
+    IPP_UTILS_CLOCK_AVAILABLE = False
+
 HEARTBEAT_TIMEOUT = 12 # Seconds
 CLEANUP_INTERVAL = 5 # Seconds
 
@@ -460,9 +469,21 @@ class FacadeRegistry(object):
         return self.preprocess_resource("node", self.node_data["id"], self.node_data, api_version)
 
     def update_ptp(self):
+        if IPP_UTILS_CLK_AVAILABLE:
+            sts = IppClock().PTPStatus()
         do_update = False
         for clk in self.node_data['clocks']:
-            if "ref_type" in clk and clk["ref_type"] == "ptp":
+            if IPP_UTILS_CLK_AVAIABLE:
+                old_clk = copy.copy(clk)
+                if len(sts.keys()) > 0:
+                    clk['traceable'] = sts['timeTraceable']
+                    clk['gmid'] = sts['grandmasterClockIdentity'].lower()
+                    clk['locked'] = (sts['ofm'][0] == 0)
+                else:
+                    clk['traceable'] = False
+                    clk['gmid'] = '00-00-00-00-00-00-00-00'
+                    clk['locked'] = False
+            elif "ref_type" in clk and clk["ref_type"] == "ptp":
                 clk['traceable'] = False
                 clk['gmid'] = '00-00-00-00-00-00-00-00'
                 clk['locked'] = False
