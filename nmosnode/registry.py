@@ -30,7 +30,6 @@ from nmoscommon import config as _config
 try:
     # Use internal BBC RD ipputils to get PTP if available
     from pyipputils.ippclock import IppClock
-    clk = IppClock()
     IPP_UTILS_CLOCK_AVAILABLE = True
 except ImportError:
     # Library not available, use fallback
@@ -473,23 +472,18 @@ class FacadeRegistry(object):
             sts = IppClock().PTPStatus()
         do_update = False
         for clk in self.node_data['clocks']:
+            old_clk = copy.copy(clk)
+            clk['traceable'] = False
+            clk['gmid'] = '00-00-00-00-00-00-00-00'
+            clk['locked'] = False
             if IPP_UTILS_CLK_AVAIABLE:
                 if "ref_type" in clk and clk["ref_type"] == "ptp":
-                    old_clk = copy.copy(clk)
                     if len(sts.keys()) > 0:
                         clk['traceable'] = sts['timeTraceable']
                         clk['gmid'] = sts['grandmasterClockIdentity'].lower()
                         clk['locked'] = (sts['ofm'][0] == 0)
-                    else:
-                        clk['traceable'] = False
-                        clk['gmid'] = '00-00-00-00-00-00-00-00'
-                        clk['locked'] = False
-            elif "ref_type" in clk and clk["ref_type"] == "ptp":
-                clk['traceable'] = False
-                clk['gmid'] = '00-00-00-00-00-00-00-00'
-                clk['locked'] = False
-        if do_update:
-            self.update_node()
+                    if clk != old_clk:
+                        self.update_node()
 
 if __name__ == "__main__":
     import uuid
