@@ -1,3 +1,7 @@
 .DS_Store
 *.swp
 *.pyc
+debian/python-nodefacade
+debian/python-nodefacade.*
+build/
+debian/files

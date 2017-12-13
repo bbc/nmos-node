@@ -31,6 +31,7 @@ from registry import FacadeRegistry, FacadeRegistryCleaner, legalise_resource
 from serviceinterface import FacadeInterface
 from os import getpid
 from subprocess import check_output
+from systemd import daemon
 
 from api import NODE_APIVERSIONS
 from api import NODE_REGVERSION
@@ -56,7 +57,9 @@ FQDN = getfqdn()
 HTTPS_MODE = 'disabled'
 
 def updateHost () :
-    if nmoscommonconfig.config.get('prefer_ipv6',False) == False:
+    if nmoscommonconfig.config.get('node_hostname') is not None:
+        return nmoscommonconfig.config.get('node_hostname')
+    elif nmoscommonconfig.config.get('prefer_ipv6',False) == False:
         return getLocalIP()
     else :
         return "[" + getLocalIP(None, socket.AF_INET6) + "]"
@@ -88,6 +91,7 @@ class NodeFacadeService:
 
     def sig_hup_handler(self):
         if getLocalIP() != "":
+            global HOST
             HOST = updateHost()
             self.registry.modify_node(href=self.generate_href(),
                                       host=HOST,
@@ -162,9 +166,9 @@ class NodeFacadeService:
         self.node_id = get_node_id()
         node_version = str(ptptime.ptp_detail()[0]) + ":" + str(ptptime.ptp_detail()[1])
         node_data = { "id": self.node_id,
-                      "label": FQDN,
-                      "description" : "Node on {}".format(FQDN),
-                      "tags" : {},
+                      "label": nmoscommonconfig.config.get('node_label', FQDN),
+                      "description" : nmoscommonconfig.config.get('node_description', "Node on {}".format(FQDN)),
+                      "tags" : nmoscommonconfig.config.get('node_tags', {}),
                       "href": self.generate_href(),
                       "host": HOST,
                       "services": [],
@@ -220,6 +224,7 @@ class NodeFacadeService:
         pidfile = "/tmp/ips-nodefacade.pid"
         file(pidfile, 'w').write(str(getpid()))
         self.start()
+        daemon.notify("READY=1")
         while self.running:
             self.registry.update_ptp()
             time.sleep(1)
