@@ -473,17 +473,17 @@ class FacadeRegistry(object):
         do_update = False
         for clk in self.node_data['clocks']:
             old_clk = copy.copy(clk)
-            clk['traceable'] = False
-            clk['gmid'] = '00-00-00-00-00-00-00-00'
-            clk['locked'] = False
-            if IPP_UTILS_CLK_AVAIABLE:
-                if "ref_type" in clk and clk["ref_type"] == "ptp":
+            if "ref_type" in clk and clk["ref_type"] == "ptp":
+                clk['traceable'] = False
+                clk['gmid'] = '00-00-00-00-00-00-00-00'
+                clk['locked'] = False
+                if IPP_UTILS_CLK_AVAIABLE:
                     if len(sts.keys()) > 0:
-                        clk['traceable'] = sts['timeTraceable']
-                        clk['gmid'] = sts['grandmasterClockIdentity'].lower()
-                        clk['locked'] = (sts['ofm'][0] == 0)
-                    if clk != old_clk:
-                        self.update_node()
+                       clk['traceable'] = sts['timeTraceable']
+                       clk['gmid'] = sts['grandmasterClockIdentity'].lower()
+                       clk['locked'] = (sts['ofm'][0] == 0)
+            if clk != old_clk:
+                self.update_node()
 
 if __name__ == "__main__":
     import uuid
