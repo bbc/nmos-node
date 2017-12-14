@@ -2,6 +2,7 @@
 *.swp
 *.pyc
 debian/python-nodefacade
-debian/python-nodefacade.*
+debian/python-nodefacade.substvars
+debian/python-nodefacade*debhelper*
 build/
 debian/files
