@@ -483,7 +483,9 @@ class FacadeRegistry(object):
                        clk['gmid'] = sts['grandmasterClockIdentity'].lower()
                        clk['locked'] = (sts['ofm'][0] == 0)
             if clk != old_clk:
-                self.update_node()
+                do_update = True
+        if do_update:
+            self.update_node()
 
 if __name__ == "__main__":
     import uuid
