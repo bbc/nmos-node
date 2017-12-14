@@ -1,4 +1,4 @@
-description	"nmos-nodefacade"
+description	"python-nodefacade"
 author		"Andrew Bonney <andrew.bonney@bbc.co.uk>"
 
 start on started networking
