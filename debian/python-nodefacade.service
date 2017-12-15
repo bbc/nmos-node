@@ -12,4 +12,5 @@ ExecStart=/usr/bin/nmosnode
 
 [Install]
 WantedBy=multi-user.target
-Alias=nmos-node
+Alias=nmos-node.service
+Alias=python-nodefacade.service

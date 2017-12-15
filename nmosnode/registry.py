@@ -468,7 +468,7 @@ class FacadeRegistry(object):
         return self.preprocess_resource("node", self.node_data["id"], self.node_data, api_version)
 
     def update_ptp(self):
-        if IPP_UTILS_CLK_AVAILABLE:
+        if IPP_UTILS_CLOCK_AVAILABLE:
             sts = IppClock().PTPStatus()
         do_update = False
         for clk in self.node_data['clocks']:

@@ -88,7 +88,7 @@ setup(name = "nmosnodefacade",
       scripts = [
                 ],
       data_files=[
-          ('usr/bin', ['bin/nmosnode'])
+          ('/usr/bin', ['bin/nmosnode'])
       ],
       long_description = """
 Package providing a basic NMOS Node API implementation. The API is provided as a facade which accepts data from private back-end data providers.
