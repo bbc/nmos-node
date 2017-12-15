@@ -477,7 +477,7 @@ class FacadeRegistry(object):
                 clk['traceable'] = False
                 clk['gmid'] = '00-00-00-00-00-00-00-00'
                 clk['locked'] = False
-                if IPP_UTILS_CLK_AVAIABLE:
+                if IPP_UTILS_CLOCK_AVAIABLE:
                     if len(sts.keys()) > 0:
                        clk['traceable'] = sts['timeTraceable']
                        clk['gmid'] = sts['grandmasterClockIdentity'].lower()
