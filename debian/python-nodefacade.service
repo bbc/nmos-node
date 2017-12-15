@@ -12,3 +12,4 @@ ExecStart=/usr/bin/nmosnode
 
 [Install]
 WantedBy=multi-user.target
+Alias=nmos-node
