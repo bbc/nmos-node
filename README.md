@@ -13,14 +13,6 @@ sudo python setup.py install
 
 ## Running the Node Facade
 
-If you wish the Node Facade to run automatically as a service a symbolic link must be added to the system. In order to do this, run the following command in bash.
-
-```bash
-    ln -s /lib/systemd/system/nmosnode.service /etc/systemd/system/multi-user.target.wants/nmosnode.service
-```
-
-If you wish to start and stop the facade manually it can be started and stopped using a Python script. The two scripts below show how to do this in a blocking and non-blocking way.
-
 ### Non-blocking
 
 Run the following script to start the Node Facade in a non-blocking manner, and then stop it again at a later point:
