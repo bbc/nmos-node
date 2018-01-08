@@ -20,7 +20,6 @@ set -e
 
 case "$1" in
     configure)
-        service nmosnode restart || true
         service apache2 reload
 	;;
 
