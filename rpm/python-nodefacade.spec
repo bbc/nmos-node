@@ -31,10 +31,10 @@ IS-04 node facade service
 %{py2_install}
 
 # Install systemd unit file
-install -D -p -m 0644 debian/ips-nodefacade.service %{buildroot}%{_unitdir}/ips-nodefacade.service
+install -D -p -m 0644 rpm/ips-nodefacade.service %{buildroot}%{_unitdir}/ips-nodefacade.service
 
 # Install Apache config file
-install -D -p -m 0644 etc/apache2/sites-available/nmos-api-node.conf %{buildroot}%{_sysconfdir}/httpd/conf.d/nmos-apis/nmos-api-node.conf
+install -D -p -m 0644 rpm/nmos-api-node.conf %{buildroot}%{_sysconfdir}/httpd/conf.d/nmos-apis/nmos-api-node.conf
 
 
 %post
