@@ -50,15 +50,15 @@ systemctl stop ips-nodefacade
 rm -rf %{buildroot}
 
 %files
-%{_bindir}/nmos-node
+%{_bindir}/nmosnode
 
 %{_unitdir}/ips-nodefacade.service
 
-%{python2_sitelib}/nodefacade
-%{python2_sitelib}/nmosnodefacade-%{version}*.egg-info
+%{python2_sitelib}/nmosnode
+%{python2_sitelib}/nmosnode-%{version}*.egg-info
 
 %defattr(-,ipstudio, ipstudio,-)
-%config %{_sysconfdir}/httpd/conf.d/nmos-apis/nmos-api-node-v1_0.conf
+%config %{_sysconfdir}/httpd/conf.d/nmos-apis/ips-api-node-v1_0.conf
 
 %changelog
 * Fri Nov 10 2017 Simon Rankine <Simon.Rankine@bbc.co.uk> - 0.1.0-2
