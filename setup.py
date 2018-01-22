@@ -75,7 +75,7 @@ packages_required = [
 
 deps_required = []
 
-setup(name = "nmosnodefacade",
+setup(name = "nmosnode",
       version = "0.1.0",
       description = "nmos node API",
       url='www.nmos.tv',
