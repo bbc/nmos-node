@@ -20,6 +20,10 @@ set -e
 
 case "$1" in
     configure)
+	mkdir -p /var/nmos-node
+        chown -R ipstudio:ipstudio /var/nmos-node
+        chmod a+rwx /var/nmos-node
+        usermod -aG adm ipstudio # Necessary for lldpcli
         service apache2 reload
 	;;
 
