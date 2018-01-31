@@ -58,7 +58,7 @@ rm -rf %{buildroot}
 %{python2_sitelib}/nmosnode-%{version}*.egg-info
 
 %defattr(-,ipstudio, ipstudio,-)
-%config %{_sysconfdir}/httpd/conf.d/ips-apis/ips-api-node.conf
+%config %{_sysconfdir}/httpd/conf.d/ips-api-node.conf
 
 %changelog
 * Fri Nov 10 2017 Simon Rankine <Simon.Rankine@bbc.co.uk> - 0.1.0-2
