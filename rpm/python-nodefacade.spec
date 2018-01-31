@@ -34,7 +34,7 @@ IS-04 node facade service
 install -D -p -m 0644 rpm/ips-nodefacade.service %{buildroot}%{_unitdir}/ips-nodefacade.service
 
 # Install Apache config file
-install -D -p -m 0644 rpm/ips-api-node.conf %{buildroot}%{_sysconfdir}/httpd/conf.d/ips-apis/ips-api-node.conf
+install -D -p -m 0644 rpm/ips-api-node.conf %{buildroot}%{_sysconfdir}/httpd/conf.d/ips-api-node.conf
 
 
 %post
