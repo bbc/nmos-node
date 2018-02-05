@@ -1,4 +1,4 @@
-Name: 			nmosnode
+Name: 			python-nodefacade
 Version: 		0.1.0
 Release: 		1%{?dist}
 License: 		Internal Licence
@@ -55,7 +55,7 @@ rm -rf %{buildroot}
 %{_unitdir}/ips-nodefacade.service
 
 %{python2_sitelib}/nmosnode
-%{python2_sitelib}/nmosnode-%{version}*.egg-info
+%{python2_sitelib}/python-nodefacade-%{version}*.egg-info
 
 %defattr(-,ipstudio, ipstudio,-)
 %config %{_sysconfdir}/httpd/conf.d/ips-apis/ips-api-node.conf
