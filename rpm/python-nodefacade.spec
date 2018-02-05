@@ -55,7 +55,7 @@ rm -rf %{buildroot}
 %{_unitdir}/ips-nodefacade.service
 
 %{python2_sitelib}/nmosnode
-%{python2_sitelib}/python-nodefacade-%{version}*.egg-info
+%{python2_sitelib}/python_nodefacade-%{version}*.egg-info
 
 %defattr(-,ipstudio, ipstudio,-)
 %config %{_sysconfdir}/httpd/conf.d/ips-apis/ips-api-node.conf
