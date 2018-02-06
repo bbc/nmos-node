@@ -1,6 +1,6 @@
 Name: 			python-nodefacade
 Version: 		0.1.0
-Release: 		1%{?dist}
+Release: 		2%{?dist}
 License: 		Internal Licence
 Summary: 		Provides the ipstudio node facade service
 
