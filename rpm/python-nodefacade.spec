@@ -13,10 +13,11 @@ BuildRequires:  python-setuptools
 BuildRequires:  nmoscommon
 BuildRequires:	systemd
 
-Requires:       python
-Requires:       ips-reverseproxy-common
+Requires: python
+Requires: ips-reverseproxy-common
 Requires:	nmoscommon
 Requires: systemd-python
+Requires: python2-oauthlib
 %{?systemd_requires}
 
 %description
