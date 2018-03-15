@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import print_function
+
 import time, threading, copy
 
 from nmoscommon.logger import Logger
@@ -490,19 +492,19 @@ class FacadeRegistry(object):
 if __name__ == "__main__":
     import uuid
     registry = FacadeRegistry()
-    print "Registering service and flow"
+    print("Registering service and flow")
     registry.register_service("pipelinemanager", 100, "http://127.0.0.1:12345")
     test_key = str(uuid.uuid4())
     registry.register_resource("pipelinemanager", "flow", test_key, {"label": "test"})
     registry.cleanup_services()
-    print "Find Service:", registry.find_service("flow", test_key)
-    print "Self:", registry.list_self()
-    print "Flows:", registry.list_resource("flow")
-    print "Sources:", registry.list_resource("source")
-    print "Sleeping for", HEARTBEAT_TIMEOUT+1 ,"seconds"
+    print("Find Service:", registry.find_service("flow", test_key))
+    print("Self:", registry.list_self())
+    print("Flows:", registry.list_resource("flow"))
+    print("Sources:", registry.list_resource("source"))
+    print("Sleeping for", HEARTBEAT_TIMEOUT+1 ,"seconds")
     time.sleep(HEARTBEAT_TIMEOUT+1)
     registry.cleanup_services()
     #registry.unregister_service("pipelinemanager", 100)
-    print "Self:", registry.list_self()
-    print "Flows:", registry.list_resource("flow")
-    print "Soures:", registry.list_resource("source")
+    print("Self:", registry.list_self())
+    print("Flows:", registry.list_resource("flow"))
+    print("Soures:", registry.list_resource("source"))

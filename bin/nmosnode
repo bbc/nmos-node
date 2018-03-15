@@ -1,4 +1,5 @@
 #!/usr/bin/python
+from __future__ import print_function
 
 from gevent import monkey
 monkey.patch_all()
@@ -36,7 +37,7 @@ Node Facade in interactive mode
 Use ^D to exit this console to quit.""")
 
         def _runner():
-            print "Opening Debug console on port {}".format(args.interactive)
+            print("Opening Debug console on port {}".format(args.interactive))
             try:
                 backdoor.serve_forever()
             except:

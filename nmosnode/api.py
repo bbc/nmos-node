@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import print_function
+
 from nmoscommon.webapi import *
 from urlparse import urlparse, urljoin
 import httplib
@@ -94,7 +96,7 @@ class FacadeAPI(WebAPI):
         headers['Accept'] = 'application/json'
         del headers['Host']
 
-        print "Sending {} request to '{}' with headers={} and data='{}'".format(request.method, href, headers, request.data)
+        print("Sending {} request to '{}' with headers={} and data='{}'".format(request.method, href, headers, request.data))
 
         try:
             resp = requests.request(request.method, href, params=request.args, data=request.data, headers=headers, allow_redirects=True, timeout=30)
@@ -104,7 +106,7 @@ class FacadeAPI(WebAPI):
         if not resp:
             abort(503)
 
-        print resp
+        print(resp)
 
         if resp.status_code/100 != 2:
             abort(resp.status_code)

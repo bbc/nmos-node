@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import print_function
+
 import unittest
 import registry
 import time
@@ -147,7 +149,7 @@ class TestRegistry(unittest.TestCase):
         """Registering a resource adds a 'node_id' property to the resource"""
         self.registry.register_resource("a", 1, "device", "device_a_key", {"label": "device_a"})
         service_resources = self.registry.list_resource("device")
-        print service_resources
+        print(service_resources)
         self.assertEqual("test_node_id", service_resources["device_a_key"]["node_id"])
 
     def test_register_calls_aggregator(self):

@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import print_function
+
 import gevent
 from gevent import monkey
 monkey.patch_all()
@@ -86,7 +88,7 @@ class NodeFacadeService:
         self.aggregator       = Aggregator(self.logger, self.mdns_updater)
 
     def sig_handler(self):
-        print 'Pressed ctrl+c'
+        print('Pressed ctrl+c')
         self.stop()
 
     def sig_hup_handler(self):
