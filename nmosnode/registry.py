@@ -12,17 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from __future__ import print_function
+from __future__ import print_function, absolute_import
 
 import time, threading, copy
 
 from nmoscommon.logger import Logger
 from nmoscommon import ptptime
 from copy import deepcopy
-from api import NODE_APIVERSIONS
-from api import NODE_REGVERSION
-from api import NODE_APINAMESPACE
-from api import NODE_APINAME
+from .api import NODE_APIVERSIONS
+from .api import NODE_REGVERSION
+from .api import NODE_APINAMESPACE
+from .api import NODE_APINAME
 import re
 import copy
 import json
