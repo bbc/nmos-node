@@ -16,9 +16,7 @@
 
 
 from setuptools import setup
-from distutils.version import LooseVersion
 import os
-import sys
 
 # Basic metadata
 name = "python-nodefacade"
@@ -29,8 +27,10 @@ author = "Peter Brightwell"
 author_email = "peter.brightwell@bbc.co.uk"
 licence = "Apache 2"
 long_description = """
-Package providing a basic NMOS Node API implementation. The API is provided as a facade which accepts data from private back-end data providers.
+Package providing a basic NMOS Node API implementation. The API is provided as a facade which accepts data from private
+back-end data providers.
 """
+
 
 def check_packages(packages):
     failure = False
@@ -43,6 +43,7 @@ def check_packages(packages):
             print "you need to install :", package_details
 
     return not failure
+
 
 def check_dependencies(packages):
     failure = False
@@ -58,18 +59,20 @@ def check_dependencies(packages):
 
     return not failure
 
+
 def is_package(path):
     return (
         os.path.isdir(path) and
         os.path.isfile(os.path.join(path, '__init__.py'))
         )
 
-def find_packages(path, base="" ):
+
+def find_packages(path, base=""):
     """ Find all packages in path """
     packages = {}
     for item in os.listdir(path):
         dir = os.path.join(path, item)
-        if is_package( dir ):
+        if is_package(dir):
             if base:
                 module_name = "%(base)s.%(item)s" % vars()
             else:
@@ -77,6 +80,7 @@ def find_packages(path, base="" ):
             packages[module_name] = dir
             packages.update(find_packages(dir, module_name))
     return packages
+
 
 packages = find_packages(".")
 package_names = packages.keys()
