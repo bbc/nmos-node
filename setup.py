@@ -15,6 +15,7 @@
 # limitations under the License.
 
 
+from __future__ import print_function
 from setuptools import setup
 import os
 
@@ -39,8 +40,8 @@ def check_packages(packages):
             __import__(python_package)
         except ImportError as err:
             failure = True
-            print "Cannot find", python_package,
-            print "you need to install :", package_details
+            print("Cannot find", python_package,)
+            print("you need to install :", package_details)
 
     return not failure
 
@@ -52,10 +53,10 @@ def check_dependencies(packages):
             __import__(python_package)
         except ImportError as err:
             failure = True
-            print
-            print "Cannot find", python_package,
-            print "you need to install :", dependency_filename
-            print "... originally retrieved from", dependency_url
+            print()
+            print("Cannot find", python_package,)
+            print("you need to install :", dependency_filename)
+            print("... originally retrieved from", dependency_url)
 
     return not failure
 
