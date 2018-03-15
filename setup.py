@@ -20,6 +20,18 @@ from distutils.version import LooseVersion
 import os
 import sys
 
+# Basic metadata
+name = "python-nodefacade"
+version = "0.1.0"
+description = "nmos node API"
+url = "www.nmos.tv"
+author = "Peter Brightwell"
+author_email = "peter.brightwell@bbc.co.uk"
+licence = "Apache 2"
+long_description = """
+Package providing a basic NMOS Node API implementation. The API is provided as a facade which accepts data from private back-end data providers.
+"""
+
 def check_packages(packages):
     failure = False
     for python_package, package_details in packages:
@@ -75,22 +87,19 @@ packages_required = [
 
 deps_required = []
 
-setup(name = "python-nodefacade",
-      version = "0.1.0",
-      description = "nmos node API",
-      url='www.nmos.tv',
-      author='Peter Brightell',
-      author_email='peter.brightwell@bbc.co.uk',
-      license='Apache 2',
-      packages = package_names,
-      package_dir = packages,
-      install_requires = packages_required,
-      scripts = [
-                ],
+setup(name=name,
+      version=version,
+      description=description,
+      url=url,
+      author=author,
+      author_email=author_email,
+      license=licence,
+      packages=package_names,
+      package_dir=packages,
+      install_requires=packages_required,
+      scripts=[],
       data_files=[
           ('/usr/bin', ['bin/nmosnode'])
       ],
-      long_description = """
-Package providing a basic NMOS Node API implementation. The API is provided as a facade which accepts data from private back-end data providers.
-"""
+      long_description=long_description
       )
