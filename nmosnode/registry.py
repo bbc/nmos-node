@@ -297,7 +297,7 @@ class FacadeRegistry(object):
 
     def cleanup_services(self):
         timed_out = time.time() - HEARTBEAT_TIMEOUT
-        for name in self.services.keys():
+        for name in list(self.services.keys()):
             if self.services[name]["heartbeat"] < timed_out:
                 self.unregister_service(name, self.services[name]["pid"])
 
@@ -415,7 +415,7 @@ class FacadeRegistry(object):
         return RES_SUCCESS
 
     def list_services(self, api_version="v1.0"):
-        return self.services.keys()
+        return list(self.services.keys())
 
     def get_service_href(self, name, api_version="v1.0"):
         if not name in self.services:
@@ -435,7 +435,7 @@ class FacadeRegistry(object):
             value_copy = copy.deepcopy(value)
             for name in self.services:
                 if key in self.services[name]["control"] and "controls" in value_copy:
-                    value_copy["controls"] = value_copy["controls"] + self.services[name]["control"][key].values()
+                    value_copy["controls"] = value_copy["controls"] + list(self.services[name]["control"][key].values())
             return legalise_resource(value_copy, type, api_version)
         else:
             return legalise_resource(value, type, api_version)
@@ -445,11 +445,19 @@ class FacadeRegistry(object):
             return RES_UNSUPPORTED
         response = {}
         for name in self.services:
-            response = (dict(response.items() + [ (k, self.preprocess_resource(type, k, x, api_version))
-                                                  for (k,x) in self.services[name]["resource"][type].items()
-                                                  if ((api_version == "v1.0") or
-                                                      ("max_api_version" in x and
-                                                       not api_version_less_than(x["max_api_version"], api_version))) ]))
+            response = (dict(list(response.items()) +
+                        [
+                            (k, self.preprocess_resource(type, k, x, api_version))
+                            for (k, x) in self.services[name]["resource"][type].items()
+                            if (
+                                api_version == "v1.0" or
+                                (
+                                    "max_api_version" in x and
+                                    not api_version_less_than(x["max_api_version"], api_version)
+                                )
+                            )
+                        ]
+                    ))
         return response
 
     def _update_mdns(self, type):

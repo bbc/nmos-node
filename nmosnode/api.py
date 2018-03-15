@@ -15,8 +15,8 @@
 from __future__ import print_function
 
 from nmoscommon.webapi import *
-from urlparse import urlparse, urljoin
-import httplib
+import six.moves.urllib.parse
+import six.moves.http_client
 import requests
 from nmoscommon.utils import getLocalIP
 from socket import gethostname

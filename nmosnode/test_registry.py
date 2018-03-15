@@ -89,16 +89,16 @@ class TestRegistryServices(unittest.TestCase):
 
         # do not allow non-existent services to be removed
         self.assertEqual(registry.RES_NOEXISTS, self.registry.unregister_service("not_there", 1))
-        self.assertItemsEqual(["test_srv_1", "test_srv_2"], self.registry.list_services())
+        six.assertCountEqual(self, ["test_srv_1", "test_srv_2"], self.registry.list_services())
 
         # attempt to remove with wrong pid
         self.assertEqual(registry.RES_UNAUTHORISED, self.registry.unregister_service("test_srv_1", 1))
-        self.assertItemsEqual(["test_srv_1", "test_srv_2"], self.registry.list_services())
+        six.assertCountEqual(self, ["test_srv_1", "test_srv_2"], self.registry.list_services())
 
         # remove one
         self.assertEqual(registry.RES_SUCCESS, self.registry.unregister_service("test_srv_1", 100))
         self.assertNotIn("test_srv_1", self.registry.services)
-        self.assertItemsEqual(["test_srv_2"], self.registry.list_services())
+        six.assertCountEqual(self, ["test_srv_2"], self.registry.list_services())
 
     def test_update_service(self):
         self.registry.register_service("a", "test", 1, "http://a")
