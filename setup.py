@@ -21,7 +21,7 @@ import os
 
 # Basic metadata
 name = "python-nodefacade"
-version = "0.1.0"
+version = "0.3.0"
 description = "nmos node API"
 url = "www.nmos.tv"
 author = "Peter Brightwell"
