@@ -6,3 +6,11 @@ debian/python-nodefacade.substvars
 debian/python-nodefacade*debhelper*
 build/
 debian/files
+
+# Unit testing bits
+.coverage
+*,cover
+.tox
+
+# Python packaging metadata
+*.egg-info
