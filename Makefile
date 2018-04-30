@@ -25,4 +25,4 @@ clean:
 	find . -name '*.pyc' -delete
 
 test:
-	$(PYTHON) -m unittest discover -s ./nmosnode
+	$(PYTHON) -m unittest discover -s ./tests
