@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import print_function, absolute_import
+
 import gevent
 from gevent import monkey
 monkey.patch_all()
@@ -26,15 +28,15 @@ import json
 from nmoscommon.httpserver import HttpServer
 from nmoscommon.utils import get_node_id
 from socket import gethostname, getfqdn
-from api import FacadeAPI
-from registry import FacadeRegistry, FacadeRegistryCleaner, legalise_resource
-from serviceinterface import FacadeInterface
+from .api import FacadeAPI
+from .registry import FacadeRegistry, FacadeRegistryCleaner, legalise_resource
+from .serviceinterface import FacadeInterface
 from os import getpid
 from subprocess import check_output
 from systemd import daemon
 
-from api import NODE_APIVERSIONS
-from api import NODE_REGVERSION
+from .api import NODE_APIVERSIONS
+from .api import NODE_REGVERSION
 
 from nmoscommon.utils import getLocalIP
 from nmoscommon.aggregator import Aggregator
@@ -86,7 +88,7 @@ class NodeFacadeService:
         self.aggregator       = Aggregator(self.logger, self.mdns_updater)
 
     def sig_handler(self):
-        print 'Pressed ctrl+c'
+        print('Pressed ctrl+c')
         self.stop()
 
     def sig_hup_handler(self):

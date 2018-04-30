@@ -12,15 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import print_function, absolute_import
+
 import time, threading, copy
 
 from nmoscommon.logger import Logger
 from nmoscommon import ptptime
 from copy import deepcopy
-from api import NODE_APIVERSIONS
-from api import NODE_REGVERSION
-from api import NODE_APINAMESPACE
-from api import NODE_APINAME
+from .api import NODE_APIVERSIONS
+from .api import NODE_REGVERSION
+from .api import NODE_APINAMESPACE
+from .api import NODE_APINAME
 import re
 import copy
 import json
@@ -295,7 +297,7 @@ class FacadeRegistry(object):
 
     def cleanup_services(self):
         timed_out = time.time() - HEARTBEAT_TIMEOUT
-        for name in self.services.keys():
+        for name in list(self.services.keys()):
             if self.services[name]["heartbeat"] < timed_out:
                 self.unregister_service(name, self.services[name]["pid"])
 
@@ -413,7 +415,7 @@ class FacadeRegistry(object):
         return RES_SUCCESS
 
     def list_services(self, api_version="v1.0"):
-        return self.services.keys()
+        return list(self.services.keys())
 
     def get_service_href(self, name, api_version="v1.0"):
         if not name in self.services:
@@ -433,7 +435,7 @@ class FacadeRegistry(object):
             value_copy = copy.deepcopy(value)
             for name in self.services:
                 if key in self.services[name]["control"] and "controls" in value_copy:
-                    value_copy["controls"] = value_copy["controls"] + self.services[name]["control"][key].values()
+                    value_copy["controls"] = value_copy["controls"] + list(self.services[name]["control"][key].values())
             return legalise_resource(value_copy, type, api_version)
         else:
             return legalise_resource(value, type, api_version)
@@ -443,11 +445,19 @@ class FacadeRegistry(object):
             return RES_UNSUPPORTED
         response = {}
         for name in self.services:
-            response = (dict(response.items() + [ (k, self.preprocess_resource(type, k, x, api_version))
-                                                  for (k,x) in self.services[name]["resource"][type].items()
-                                                  if ((api_version == "v1.0") or
-                                                      ("max_api_version" in x and
-                                                       not api_version_less_than(x["max_api_version"], api_version))) ]))
+            response = (dict(list(response.items()) +
+                        [
+                            (k, self.preprocess_resource(type, k, x, api_version))
+                            for (k, x) in self.services[name]["resource"][type].items()
+                            if (
+                                api_version == "v1.0" or
+                                (
+                                    "max_api_version" in x and
+                                    not api_version_less_than(x["max_api_version"], api_version)
+                                )
+                            )
+                        ]
+                    ))
         return response
 
     def _update_mdns(self, type):
@@ -490,19 +500,19 @@ class FacadeRegistry(object):
 if __name__ == "__main__":
     import uuid
     registry = FacadeRegistry()
-    print "Registering service and flow"
+    print("Registering service and flow")
     registry.register_service("pipelinemanager", 100, "http://127.0.0.1:12345")
     test_key = str(uuid.uuid4())
     registry.register_resource("pipelinemanager", "flow", test_key, {"label": "test"})
     registry.cleanup_services()
-    print "Find Service:", registry.find_service("flow", test_key)
-    print "Self:", registry.list_self()
-    print "Flows:", registry.list_resource("flow")
-    print "Sources:", registry.list_resource("source")
-    print "Sleeping for", HEARTBEAT_TIMEOUT+1 ,"seconds"
+    print("Find Service:", registry.find_service("flow", test_key))
+    print("Self:", registry.list_self())
+    print("Flows:", registry.list_resource("flow"))
+    print("Sources:", registry.list_resource("source"))
+    print("Sleeping for", HEARTBEAT_TIMEOUT+1 ,"seconds")
     time.sleep(HEARTBEAT_TIMEOUT+1)
     registry.cleanup_services()
     #registry.unregister_service("pipelinemanager", 100)
-    print "Self:", registry.list_self()
-    print "Flows:", registry.list_resource("flow")
-    print "Soures:", registry.list_resource("source")
+    print("Self:", registry.list_self())
+    print("Flows:", registry.list_resource("flow"))
+    print("Soures:", registry.list_resource("source"))

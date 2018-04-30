@@ -15,36 +15,23 @@
 # limitations under the License.
 
 
+from __future__ import print_function
 from setuptools import setup
-from distutils.version import LooseVersion
 import os
-import sys
 
-def check_packages(packages):
-    failure = False
-    for python_package, package_details in packages:
-        try:
-            __import__(python_package)
-        except ImportError as err:
-            failure = True
-            print "Cannot find", python_package,
-            print "you need to install :", package_details
+# Basic metadata
+name = "python-nodefacade"
+version = "0.3.0"
+description = "nmos node API"
+url = "www.nmos.tv"
+author = "Peter Brightwell"
+author_email = "peter.brightwell@bbc.co.uk"
+licence = "Apache 2"
+long_description = """
+Package providing a basic NMOS Node API implementation. The API is provided as a facade which accepts data from private
+back-end data providers.
+"""
 
-    return not failure
-
-def check_dependencies(packages):
-    failure = False
-    for python_package, dependency_filename, dependency_url in packages:
-        try:
-            __import__(python_package)
-        except ImportError as err:
-            failure = True
-            print
-            print "Cannot find", python_package,
-            print "you need to install :", dependency_filename
-            print "... originally retrieved from", dependency_url
-
-    return not failure
 
 def is_package(path):
     return (
@@ -52,12 +39,13 @@ def is_package(path):
         os.path.isfile(os.path.join(path, '__init__.py'))
         )
 
-def find_packages(path, base="" ):
+
+def find_packages(path, base=""):
     """ Find all packages in path """
     packages = {}
     for item in os.listdir(path):
         dir = os.path.join(path, item)
-        if is_package( dir ):
+        if is_package(dir):
             if base:
                 module_name = "%(base)s.%(item)s" % vars()
             else:
@@ -66,31 +54,30 @@ def find_packages(path, base="" ):
             packages.update(find_packages(dir, module_name))
     return packages
 
+
 packages = find_packages(".")
 package_names = packages.keys()
 
 packages_required = [
-    "nmoscommon"
+    "nmoscommon",
+    "six"
 ]
 
 deps_required = []
 
-setup(name = "python-nodefacade",
-      version = "0.1.0",
-      description = "nmos node API",
-      url='www.nmos.tv',
-      author='Peter Brightell',
-      author_email='peter.brightwell@bbc.co.uk',
-      license='Apache 2',
-      packages = package_names,
-      package_dir = packages,
-      install_requires = packages_required,
-      scripts = [
-                ],
+setup(name=name,
+      version=version,
+      description=description,
+      url=url,
+      author=author,
+      author_email=author_email,
+      license=licence,
+      packages=package_names,
+      package_dir=packages,
+      install_requires=packages_required,
+      scripts=[],
       data_files=[
           ('/usr/bin', ['bin/nmosnode'])
       ],
-      long_description = """
-Package providing a basic NMOS Node API implementation. The API is provided as a facade which accepts data from private back-end data providers.
-"""
+      long_description=long_description
       )

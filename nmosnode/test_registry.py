@@ -12,8 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import print_function, absolute_import
+import six
+
 import unittest
-import registry
+from . import registry
 import time
 
 # to run: python test_registry.py
@@ -86,16 +89,16 @@ class TestRegistryServices(unittest.TestCase):
 
         # do not allow non-existent services to be removed
         self.assertEqual(registry.RES_NOEXISTS, self.registry.unregister_service("not_there", 1))
-        self.assertItemsEqual(["test_srv_1", "test_srv_2"], self.registry.list_services())
+        six.assertCountEqual(self, ["test_srv_1", "test_srv_2"], self.registry.list_services())
 
         # attempt to remove with wrong pid
         self.assertEqual(registry.RES_UNAUTHORISED, self.registry.unregister_service("test_srv_1", 1))
-        self.assertItemsEqual(["test_srv_1", "test_srv_2"], self.registry.list_services())
+        six.assertCountEqual(self, ["test_srv_1", "test_srv_2"], self.registry.list_services())
 
         # remove one
         self.assertEqual(registry.RES_SUCCESS, self.registry.unregister_service("test_srv_1", 100))
         self.assertNotIn("test_srv_1", self.registry.services)
-        self.assertItemsEqual(["test_srv_2"], self.registry.list_services())
+        six.assertCountEqual(self, ["test_srv_2"], self.registry.list_services())
 
     def test_update_service(self):
         self.registry.register_service("a", "test", 1, "http://a")
@@ -147,7 +150,7 @@ class TestRegistry(unittest.TestCase):
         """Registering a resource adds a 'node_id' property to the resource"""
         self.registry.register_resource("a", 1, "device", "device_a_key", {"label": "device_a"})
         service_resources = self.registry.list_resource("device")
-        print service_resources
+        print(service_resources)
         self.assertEqual("test_node_id", service_resources["device_a_key"]["node_id"])
 
     def test_register_calls_aggregator(self):

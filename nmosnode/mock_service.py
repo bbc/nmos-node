@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from registry import FacadeRegistry
+from __future__ import absolute_import
+
+from .registry import FacadeRegistry
 import gevent
 
 class MockBackend:
