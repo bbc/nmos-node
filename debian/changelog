@@ -1,5 +1,9 @@
-python-nodefacade (0.3.0) UNRELEASED; urgency=low
+python-nodefacade (0.3.1) UNRELEASED; urgency=low
 
+  [ Peter Brightwell ]
   * Initial Release
 
- -- Peter Brightwell <peter.brightwell@bbc.co.uk>  Thu, 06 Apr 2017 10:36:07 +0100
+  [ Sam Nicholson ]
+  * Fixed test failures when run with some discovery methods 
+
+ -- Sam Nicholson <sam.nicholson@bbc.co.uk>  Mon, 30 Apr 2018 16:12:10 +0100
