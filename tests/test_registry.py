@@ -16,7 +16,7 @@ from __future__ import print_function, absolute_import
 import six
 
 import unittest
-from . import registry
+from nmosnode import registry
 import time
 
 # to run: python test_registry.py
