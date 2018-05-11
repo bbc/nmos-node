@@ -4,6 +4,9 @@
 debian/python-nodefacade
 debian/python-nodefacade.substvars
 debian/python-nodefacade*debhelper*
+debian/python3-nodefacade
+debian/python3-nodefacade.substvars
+debian/python3-nodefacade*debhelper*
 build/
 debian/files
 
