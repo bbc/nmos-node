@@ -2,12 +2,19 @@ Source: python-nodefacade
 Maintainer: Peter Brightwell <peter.brightwell@bbc.co.uk>
 Section: python
 Priority: optional
-Build-Depends: python-all (>= 2.6.6-3), debhelper (>= 7), dh-python, python-setuptools, dh-systemd, dh-apache2
+Build-Depends: python-all (>= 2.6.6-3), python3-all, debhelper (>= 7), dh-python, python-setuptools, python3-setuptools, dh-systemd, dh-apache2
 Standards-Version: 3.9.7
 
 Package: python-nodefacade
 Architecture: all
-Depends: ${misc:Depends}, ${python:Depends}, python-systemd
-Recommends: lldpd, python-nmoscommon, ips-reverseproxy-common, python-mdnsbridge
+Depends: ${misc:Depends}, ${python:Depends}, python-systemd, python-nmoscommon
+Recommends: lldpd, ips-reverseproxy-common, python-mdnsbridge
 Description: Node facade for service registration and aggregation
+ See www.nmos.tv for more details
+
+Package: python3-nodefacade
+Architecture: all
+Depends: ${misc:Depends}, ${python3:Depends}, python3-systemd, python3-nmoscommon
+Recommends: lldpd, ips-reverseproxy-common, python3-mdnsbridge
+Description: Node facade for service registration and aggregation (Python 3)
  See www.nmos.tv for more details
