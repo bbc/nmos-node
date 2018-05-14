@@ -20,7 +20,6 @@ monkey.patch_all()
 
 import time
 import signal
-import uuid
 import os
 import sys
 import json
@@ -128,11 +127,16 @@ class NodeFacadeService:
         net_path = "/sys/class/net/"
         if os.path.exists(net_path):
             for interface_name in os.listdir(net_path):
-                if interface_name != "lo":
-                    address_path = net_path + interface_name + "/address"
-                    if os.path.exists(address_path):
-                        address = open(address_path, "r").readline()
-                        interfaces[interface_name] = {"name": interface_name, "chassis_id": None, "port_id": address.lower().strip("\n").replace(":", "-")}
+                address_path = net_path + interface_name + "/address"
+                if os.path.exists(address_path) and interface_name != 'lo':
+                    with open(address_path, 'r') as address_file:
+                        address = address_file.readline().strip('\n')
+                        if address:
+                            interfaces[interface_name] = {
+                                "name": interface_name,
+                                "chassis_id": None,
+                                "port_id": address.lower().replace(":", "-")
+                            }
 
         # Attempt to source proper LLDP data for interfaces
         if os.path.exists("/usr/sbin/lldpcli"):
