@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.2
+- Fixes handling of virtual interfaces via Node /self resource
+
 ## 0.3.1
 - Fixed test failures when run with some discovery methods
 

@@ -1,4 +1,4 @@
-python-nodefacade (0.3.1) UNRELEASED; urgency=low
+python-nodefacade (0.3.2) UNRELEASED; urgency=low
 
   [ Peter Brightwell ]
   * Initial Release
@@ -6,4 +6,7 @@ python-nodefacade (0.3.1) UNRELEASED; urgency=low
   [ Sam Nicholson ]
   * Fixed test failures when run with some discovery methods 
 
- -- Sam Nicholson <sam.nicholson@bbc.co.uk>  Mon, 30 Apr 2018 16:12:10 +0100
+  [ Andrew Bonney ]
+  * Fixes handling of virtual interfaces via Node /self resource
+
+ -- Andrew Bonney <andrew.bonney@bbc.co.uk>  Mon, 14 May 2018 11:44:14 +0100
