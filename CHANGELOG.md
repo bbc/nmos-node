@@ -1,4 +1,4 @@
-# Changelog
+# NMOS Node API Implementation Changelog
 
 ## 0.3.2
 - Fixes handling of virtual interfaces via Node /self resource
