@@ -20,7 +20,7 @@ from setuptools import setup
 import os
 
 # Basic metadata
-name = "python-nodefacade"
+name = "nodefacade"
 version = "0.3.2"
 description = "nmos node API"
 url = "www.nmos.tv"
