@@ -28,6 +28,9 @@ pipeline {
         booleanParam(name: "FORCE_PYUPLOAD", defaultValue: false, description: "Force Python artifact upload")
         booleanParam(name: "FORCE_DEBUPLOAD", defaultValue: false, description: "Force Debian package upload")
     }
+    triggers {
+        upstream (upstreamProjects: "ap.python-library-nmos-common")
+    }
     environment {
         http_proxy = "http://www-cache.rd.bbc.co.uk:8080"
         https_proxy = "http://www-cache.rd.bbc.co.uk:8080"
@@ -109,28 +112,24 @@ pipeline {
         }
         stage ("Build Package") {
             parallel{
-                stage ("Build wheels") {
-                    stages {
-                        stage ("Build py2.7 wheel") {
-                            steps {
-                                script {
-                                    env.py27wheel_result = "FAILURE"
-                                }
-                                bbcGithubNotify(context: "wheelBuild/py2.7", status: "PENDING")
-                                bbcMakeWheel("py27")
-                                script {
-                                    env.py27wheel_result = "SUCCESS" // This will only run if the steps above succeeded
-                                }
-                            }
-                            post {
-                                always {
-                                    bbcGithubNotify(context: "wheelBuild/py2.7", status: env.py27wheel_result)
-                                }
-                            }
+                stage ("Build py2.7 wheel") {
+                    steps {
+                        script {
+                            env.py27wheel_result = "FAILURE"
                         }
-                        // Python 3 Builds are omitted as nmos-common is not yet Python 3 capable
+                        bbcGithubNotify(context: "wheelBuild/py2.7", status: "PENDING")
+                        bbcMakeWheel("py27")
+                        script {
+                            env.py27wheel_result = "SUCCESS" // This will only run if the steps above succeeded
+                        }
+                    }
+                    post {
+                        always {
+                            bbcGithubNotify(context: "wheelBuild/py2.7", status: env.py27wheel_result)
+                        }
                     }
                 }
+                // Python 3 Builds are omitted as nmos-common is not yet Python 3 capable
                 stage ("Build Deb with pbuilder") {
                     steps {
                         script {
