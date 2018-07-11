@@ -1,4 +1,5 @@
 recursive-include debian *
 recursive-include bin *
 recursive-include rpm *
+include stdeb.cfg
 include README.md

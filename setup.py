@@ -21,7 +21,7 @@ import os
 
 # Basic metadata
 name = "nodefacade"
-version = "0.3.3"
+version = "0.3.4"
 description = "nmos node API"
 url = "www.nmos.tv"
 author = "Peter Brightwell"
@@ -59,8 +59,9 @@ packages = find_packages(".")
 package_names = packages.keys()
 
 packages_required = [
-    "nmoscommon",
-    "six"
+    "six",
+    "systemd",
+    "nmoscommon"
 ]
 
 deps_required = []
