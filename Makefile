@@ -101,6 +101,7 @@ $(RPM_PREFIX)/SOURCES/$(MODNAME)-$(VERSION).tar.gz: $(topbuilddir)/dist/$(MODNAM
 rpm_dirs: $(RPMBUILDDIRS) $(RPM_PREFIX)/SPECS/$(MODNAME).spec $(RPM_PREFIX)/SOURCES/$(MODNAME)-$(VERSION).tar.gz
 
 rpm: $(RPM_PREFIX)/SPECS/$(MODNAME).spec $(RPM_PREFIX)/SOURCES/$(MODNAME)-$(VERSION).tar.gz $(RPMBUILDDIRS)
+	cp $(topdir)/rpm/*.service $(topdir)/rpm/*.conf $(topbuilddir)/build/rpm/SOURCES
 	rpmbuild -ba --define '_topdir $(RPM_PREFIX)' --clean $<
 	cp $(RPM_PREFIX)/RPMS/*/*.rpm $(topbuilddir)/dist
 
