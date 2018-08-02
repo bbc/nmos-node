@@ -1,10 +1,12 @@
-Name: 			python-nodefacade
-Version: 		0.1.0
+%global module_name nodefacade
+
+Name: 			python-%{module_name}
+Version: 		0.3.5
 Release: 		2%{?dist}
 License: 		Internal Licence
 Summary: 		Provides the ipstudio node facade service
 
-Source0: 		%{name}-%{version}.tar.gz
+Source0: 		%{module_name}-%{version}.tar.gz
 
 BuildArch:      noarch
 
@@ -15,7 +17,7 @@ BuildRequires:	systemd
 
 Requires: python
 Requires: ips-reverseproxy-common
-Requires:	nmoscommon
+Requires: nmoscommon
 Requires: systemd-python
 Requires: python2-oauthlib
 %{?systemd_requires}
@@ -24,7 +26,7 @@ Requires: python2-oauthlib
 IS-04 node facade service
 
 %prep
-%setup -n %{name}-%{version}
+%setup -n %{module_name}-%{version}
 
 %build
 %{py2_build}
@@ -54,10 +56,10 @@ rm -rf %{buildroot}
 %files
 %{_bindir}/nmosnode
 
-%{_unitdir}/ips-nodefacade.service
+%{_unitdir}/%{name}.service
 
-%{python2_sitelib}/nmosnode
-%{python2_sitelib}/python_nodefacade-%{version}*.egg-info
+%{python2_sitelib}/%{module_name}
+%{python2_sitelib}/%{module_name}-%{version}*.egg-info
 
 %defattr(-,ipstudio, ipstudio,-)
 %config %{_sysconfdir}/httpd/conf.d/ips-apis/ips-api-node.conf

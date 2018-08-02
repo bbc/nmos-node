@@ -66,6 +66,7 @@ test:
 
 deb_dist: $(topbuilddir)/dist/$(MODNAME)-$(VERSION).tar.gz
 	$(PY2DSC) --with-python2=true $(topbuilddir)/dist/$(MODNAME)-$(VERSION).tar.gz
+	sed -i 's/--with/--with apache2 --with systemd --with/' deb_dist/$(DEBNAME)-$(DEBVERSION)/debian/rules
 
 $(DEBIANDIR)/%: $(topdir)/debian/% deb_dist
 	cp $< $@
@@ -80,16 +81,16 @@ deb: source deb_dist $(DEBIANOVERRIDES)
 
 # START OF RPM SPEC RULES
 # If you have your own rpm spec file to use you'll need to disable these rules
-$(RPM_PREFIX)/$(MODNAME).spec: rpm_spec
-
-rpm_spec: $(topdir)/setup.py
-	$(PYTHON3) $(topdir)/setup.py bdist_rpm $(RPM_PARAMS) --spec-only --dist-dir=$(RPM_PREFIX)
+#$(RPM_PREFIX)/$(MODNAME).spec: rpm_spec
+#
+#rpm_spec: $(topdir)/setup.py
+#	$(PYTHON3) $(topdir)/setup.py bdist_rpm $(RPM_PARAMS) --spec-only --dist-dir=$(RPM_PREFIX)
 # END OF RPM SPEC RULES
 
 $(RPMBUILDDIRS):
 	mkdir -p $@
 
-$(RPM_PREFIX)/SPECS/$(MODNAME).spec: $(RPM_PREFIX)/$(MODNAME).spec $(RPM_PREFIX)/SPECS
+$(RPM_PREFIX)/SPECS/$(MODNAME).spec: $(topdir)/rpm/$(MODNAME).spec $(RPM_PREFIX)/SPECS
 	rm -rf $@
 	cp -f $< $@
 
@@ -100,6 +101,7 @@ $(RPM_PREFIX)/SOURCES/$(MODNAME)-$(VERSION).tar.gz: $(topbuilddir)/dist/$(MODNAM
 rpm_dirs: $(RPMBUILDDIRS) $(RPM_PREFIX)/SPECS/$(MODNAME).spec $(RPM_PREFIX)/SOURCES/$(MODNAME)-$(VERSION).tar.gz
 
 rpm: $(RPM_PREFIX)/SPECS/$(MODNAME).spec $(RPM_PREFIX)/SOURCES/$(MODNAME)-$(VERSION).tar.gz $(RPMBUILDDIRS)
+	cp $(topdir)/rpm/*.service $(topdir)/rpm/*.conf $(topbuilddir)/build/rpm/SOURCES
 	rpmbuild -ba --define '_topdir $(RPM_PREFIX)' --clean $<
 	cp $(RPM_PREFIX)/RPMS/*/*.rpm $(topbuilddir)/dist
 

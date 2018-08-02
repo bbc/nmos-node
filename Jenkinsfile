@@ -29,7 +29,7 @@ pipeline {
         booleanParam(name: "FORCE_DEBUPLOAD", defaultValue: false, description: "Force Debian package upload")
     }
     triggers {
-        upstream (upstreamProjects: "ap.python-library-nmos-common")
+        upstream (upstreamProjects: "apmm-repos/nmos-common/master")
     }
     environment {
         http_proxy = "http://www-cache.rd.bbc.co.uk:8080"
