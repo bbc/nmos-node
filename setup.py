@@ -21,7 +21,7 @@ import os
 
 # Basic metadata
 name = "nodefacade"
-version = "0.3.5"
+version = "0.3.6"
 description = "nmos node API"
 url = "www.nmos.tv"
 author = "Peter Brightwell"
@@ -58,6 +58,7 @@ def find_packages(path, base=""):
 packages = find_packages(".")
 package_names = packages.keys()
 
+# REMEMBER: If this list is updated, please also update stdeb.cfg and the RPM specfile
 packages_required = [
     "six",
     "systemd",
