@@ -1,7 +1,7 @@
 %global module_name nodefacade
 
 Name: 			python-%{module_name}
-Version: 		0.3.6
+Version: 		0.3.7
 Release: 		2%{?dist}
 License: 		Internal Licence
 Summary: 		Provides the ipstudio node facade service
