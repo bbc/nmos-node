@@ -460,16 +460,22 @@ class FacadeRegistry(object):
                     ))
         return response
 
+    def _len_resource(self, type):
+        response = 0
+        for name in self.services:
+            response += len(self.services[name]["resource"][type])
+        return response
+
     def _update_mdns(self, type):
-        items = self.list_resource(type)
-        if not isinstance(items, dict):
-            return
-        if len(items) == 1:
+        if not type in self.permitted_resources:
+            return RES_UNSUPPORTED
+        num_items = self._len_resource(type)
+        if num_items == 1:
             try:
                 self.mdns_updater.update_mdns(type, "register")
             except Exception:
                 self.mdns_updater.update_mdns(type, "update")
-        elif len(items) == 0:
+        elif num_items == 0:
             self.mdns_updater.update_mdns(type, "unregister")
         else:
             self.mdns_updater.update_mdns(type, "update")
