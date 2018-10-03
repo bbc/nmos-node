@@ -29,6 +29,7 @@ NODE_REGVERSION = _config.get('nodefacade', {}).get('NODE_REGVERSION', 'v1.2')
 NODE_APINAMESPACE = "x-nmos"
 NODE_APINAME = "node"
 HOSTNAME = gethostname().split(".", 1)[0]
+RESOURCE_TYPES = ["sources", "flows", "devices", "senders", "receivers"]
 
 class FacadeAPI(WebAPI):
     def __init__(self, registry):
@@ -52,21 +53,27 @@ class FacadeAPI(WebAPI):
     def versionroot(self, api_version):
         if api_version not in NODE_APIVERSIONS:
             abort(404)
-        return ["self/","sources/", "flows/", "devices/", "senders/", "receivers/"]
+        return ["self/", "sources/", "flows/", "devices/", "senders/", "receivers/"]
 
-    @resource_route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/<api_version>/senders/")
-    def senders(self, api_version):
+    @resource_route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/<api_version>/<resource_type>/")
+    def resource_list(self, api_version, resource_type):
         if api_version not in NODE_APIVERSIONS:
             abort(404)
-        return self.registry.list_resource("sender", api_version=api_version).values()
+        if resource_type == "self":
+            return self.registry.list_self(api_version=api_version)
+        elif resource_type not in RESOURCE_TYPES:
+            abort(404)
+        return self.registry.list_resource(resource_type.rstrip("s"), api_version=api_version).values()
 
-    @resource_route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/<api_version>/receivers/<receiver>/")
-    def receiver_id(self, api_version, receiver):
+    @resource_route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/<api_version>/<resource_type>/<resource_id>/")
+    def resource_id(self, api_version, resource_type, resource_id):
         if api_version not in NODE_APIVERSIONS:
             abort(404)
-        receivers = self.registry.list_resource("receiver", api_version=api_version)
-        if receiver in receivers:
-            return receivers[receiver]
+        if resource_type not in RESOURCE_TYPES:
+            abort(404)
+        resources = self.registry.list_resource(resource_type.rstrip("s"), api_version=api_version)
+        if resource_id in resources:
+            return resources[resource_id]
         else:
             abort(404)
 
@@ -120,34 +127,3 @@ class FacadeAPI(WebAPI):
             return (data)
         else:
             return (resp.status_code, data)
-
-    @resource_route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/<api_version>/receivers/")
-    def receivers(self, api_version):
-        if api_version not in NODE_APIVERSIONS:
-            abort(404)
-        return self.registry.list_resource("receiver", api_version=api_version).values()
-
-    @resource_route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/<api_version>/devices/")
-    def devices(self, api_version):
-        if api_version not in NODE_APIVERSIONS:
-            abort(404)
-        return self.registry.list_resource("device", api_version=api_version).values()
-
-    @resource_route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/<api_version>/flows/")
-    def flows(self, api_version):
-        if api_version not in NODE_APIVERSIONS:
-            abort(404)
-        flows = dict(self.registry.list_resource("flow", api_version=api_version))
-        return flows.values()
-
-    @resource_route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/<api_version>/sources/")
-    def sources(self, api_version):
-        if api_version not in NODE_APIVERSIONS:
-            abort(404)
-        return self.registry.list_resource("source", api_version=api_version).values()
-
-    @route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/<api_version>/self/")
-    def selfresource(self, api_version):
-        if api_version not in NODE_APIVERSIONS:
-            abort(404)
-        return self.registry.list_self(api_version=api_version)
