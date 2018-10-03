@@ -53,19 +53,15 @@ class FacadeAPI(WebAPI):
     def versionroot(self, api_version):
         if api_version not in NODE_APIVERSIONS:
             abort(404)
-        return ["self/","sources/", "flows/", "devices/", "senders/", "receivers/"]
-
-    @route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/<api_version>/self/")
-    def selfresource(self, api_version):
-        if api_version not in NODE_APIVERSIONS:
-            abort(404)
-        return self.registry.list_self(api_version=api_version)
+        return ["self/", "sources/", "flows/", "devices/", "senders/", "receivers/"]
 
     @resource_route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/<api_version>/<resource_type>/")
     def resource_list(self, api_version, resource_type):
         if api_version not in NODE_APIVERSIONS:
             abort(404)
-        if resource_type not in RESOURCE_TYPES:
+        if resource_type == "self":
+            return self.registry.list_self(api_version=api_version)
+        elif resource_type not in RESOURCE_TYPES:
             abort(404)
         return self.registry.list_resource(resource_type.rstrip("s"), api_version=api_version).values()
 
