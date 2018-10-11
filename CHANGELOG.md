@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.4.0
+- Add mechanism for external services to register and update clocks
+
 ## 0.3.2
 - Fixes handling of virtual interfaces via Node /self resource
 
