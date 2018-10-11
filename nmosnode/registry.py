@@ -485,23 +485,60 @@ class FacadeRegistry(object):
 
     def update_ptp(self):
         if IPP_UTILS_CLOCK_AVAILABLE:
+            old_clk = None
+            for iter_clk in self.node_data['clocks']:
+                if iter_clk["name"] == "clk1":
+                    old_clk = copy.copy(iter_clk)
+            clk = {
+                "name": "clk1",
+                "ref_type": "ptp",
+                "version": "IEEE1588-2008",
+                "traceable": False,
+                "gmid": "00-00-00-00-00-00-00-00",
+                "locked": False,
+            }
             sts = IppClock().PTPStatus()
-        do_update = False
+            if len(sts.keys()) > 0:
+                clk['traceable'] = sts['timeTraceable']
+                clk['gmid'] = sts['grandmasterClockIdentity'].lower()
+                clk['locked'] = (sts['ofm'][0] == 0)
+            if old_clk is None:
+                self.register_clock(clk)
+            elif clk != old_clk:
+                self.update_clock(clk)
+
+    def register_clock(self, clk_data):
+        if "name" not in clk_data:
+            return RES_OTHERERROR
         for clk in self.node_data['clocks']:
-            old_clk = copy.copy(clk)
-            if "ref_type" in clk and clk["ref_type"] == "ptp":
-                clk['traceable'] = False
-                clk['gmid'] = '00-00-00-00-00-00-00-00'
-                clk['locked'] = False
-                if IPP_UTILS_CLOCK_AVAILABLE:
-                    if len(sts.keys()) > 0:
-                       clk['traceable'] = sts['timeTraceable']
-                       clk['gmid'] = sts['grandmasterClockIdentity'].lower()
-                       clk['locked'] = (sts['ofm'][0] == 0)
-            if clk != old_clk:
-                do_update = True
-        if do_update:
+            if clk_data["name"] == clk["name"]:
+                return RES_EXISTS
+        self.node_data['clocks'].append(clk_data)
+        self.update_node()
+        return RES_SUCCESS
+
+    def update_clock(self, clk_data):
+        if "name" not in clk_data:
+            return RES_OTHERERROR
+        for loop_count, clk in enumerate(self.node_data['clocks']):
+            if clk_data["name"] == clk["name"]:
+                self.node_data['clocks'][loop_count] = clk_data
+                self.update_node()
+                return RES_SUCCESS
+        return RES_NOEXISTS
+
+    def unregister_clock(self, clk_name):
+        clk_index = None
+        for loop_count, clk in enumerate(self.node_data['clocks']):
+            if clk_name == clk["name"]:
+                clk_index = loop_count
+                break
+        if clk_index is not None:
+            del self.node_data['clocks'][clk_index]
             self.update_node()
+            return RES_SUCCESS
+        return RES_NOEXISTS
+
 
 if __name__ == "__main__":
     import uuid

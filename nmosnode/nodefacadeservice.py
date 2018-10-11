@@ -189,16 +189,7 @@ class NodeFacadeService:
                              {
                                  "name" : "clk0",
                                  "ref_type" : "internal",
-                             },
-                             {
-                                "name" : "clk1",
-                                "ref_type" : "ptp",
-                                "version": "IEEE1588-2008",
-                                "traceable": False,
-                                "gmid": "00-00-00-00-00-00-00-00",
-                                "locked": False,
-                            },
-                            # Extra values will be filled in as needed at point of checking
+                             }
                       ],
                       "interfaces": self.list_interfaces()
         }
