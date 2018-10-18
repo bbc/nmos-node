@@ -185,12 +185,7 @@ class NodeFacadeService:
                           "versions" : NODE_APIVERSIONS,
                           "endpoints" : self.generate_endpoints(),
                       },
-                      "clocks" : [
-                             {
-                                 "name" : "clk0",
-                                 "ref_type" : "internal",
-                             }
-                      ],
+                      "clocks" : [],
                       "interfaces": self.list_interfaces()
         }
         self.registry = FacadeRegistry(self.mappings.keys(), self.aggregator, self.mdns_updater, self.node_id, node_data, self.logger)
