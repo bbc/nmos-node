@@ -12,8 +12,6 @@
 
  Optionally you can set FORCE_PYUPLOAD to force upload to PyPI, and FORCE_DEBUPLOAD to force Debian package
  upload on non-master branches.
-
- From <https://github.com/bbc/rd-apmm-python-lib-mediatimestamp>
 */
 
 pipeline {
