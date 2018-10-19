@@ -213,6 +213,7 @@ class FacadeRegistry(object):
         # `node_data` must be correctly structured
         self.permitted_resources = resources
         self.services = {}
+        self.clocks = {"clk0": {"name": "clk0", "ref_type": "internal"}}
         self.aggregator = aggregator
         self.mdns_updater = mdns_updater
         self.node_id = node_id
@@ -234,6 +235,7 @@ class FacadeRegistry(object):
                 if self.services[service_name]["proxy_path"]:
                     href = self.node_data["href"] + self.services[service_name]["proxy_path"]
             self.node_data["services"].append({"href": href, "type": self.services[service_name]["type"]})
+        self.node_data["clocks"] = self.clocks.values()
         self.node_data["version"] = str(ptptime.ptp_detail()[0]) + ":" + str(ptptime.ptp_detail()[1])
         try:
             self.aggregator.register("node", self.node_id, **self.preprocess_resource("node", self.node_data["id"], self.node_data, NODE_REGVERSION))
@@ -483,25 +485,58 @@ class FacadeRegistry(object):
     def list_self(self, api_version="v1.0"):
         return self.preprocess_resource("node", self.node_data["id"], self.node_data, api_version)
 
+    def _ptp_clock(self):
+        clk = {
+            "name": "clk1",
+            "ref_type": "ptp",
+            "version": "IEEE1588-2008",
+            "traceable": False,
+            "gmid": "00-00-00-00-00-00-00-00",
+            "locked": False,
+        }
+        sts = IppClock().PTPStatus()
+        if len(sts.keys()) > 0:
+            clk['traceable'] = sts['timeTraceable']
+            clk['gmid'] = sts['grandmasterClockIdentity'].lower()
+            clk['locked'] = (sts['ofm'][0] == 0)
+        return clk
+
     def update_ptp(self):
         if IPP_UTILS_CLOCK_AVAILABLE:
-            sts = IppClock().PTPStatus()
-        do_update = False
-        for clk in self.node_data['clocks']:
-            old_clk = copy.copy(clk)
-            if "ref_type" in clk and clk["ref_type"] == "ptp":
-                clk['traceable'] = False
-                clk['gmid'] = '00-00-00-00-00-00-00-00'
-                clk['locked'] = False
-                if IPP_UTILS_CLOCK_AVAILABLE:
-                    if len(sts.keys()) > 0:
-                       clk['traceable'] = sts['timeTraceable']
-                       clk['gmid'] = sts['grandmasterClockIdentity'].lower()
-                       clk['locked'] = (sts['ofm'][0] == 0)
-            if clk != old_clk:
-                do_update = True
-        if do_update:
+            old_clk = None
+            if "clk1" in self.clocks:
+                old_clk = copy.copy(self.clocks["clk1"])
+            clk = self._ptp_clock()
+            if old_clk is None:
+                self.register_clock(clk)
+            elif clk != old_clk:
+                self.update_clock(clk)
+
+    def register_clock(self, clk_data):
+        if "name" not in clk_data:
+            return RES_OTHERERROR
+        if clk_data["name"] in self.clocks:
+            return RES_EXISTS
+        self.clocks[clk_data["name"]] = clk_data
+        self.update_node()
+        return RES_SUCCESS
+
+    def update_clock(self, clk_data):
+        if "name" not in clk_data:
+            return RES_OTHERERROR
+        if clk_data["name"] in self.clocks:
+            self.clocks[clk_data["name"]] = clk_data
             self.update_node()
+            return RES_SUCCESS
+        return RES_NOEXISTS
+
+    def unregister_clock(self, clk_name):
+        if clk_name in self.clocks:
+            del self.clocks[clk_name]
+            self.update_node()
+            return RES_SUCCESS
+        return RES_NOEXISTS
+
 
 if __name__ == "__main__":
     import uuid
