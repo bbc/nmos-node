@@ -66,6 +66,10 @@ def updateHost () :
         return "[" + getLocalIP(None, socket.AF_INET6) + "]"
 
 HOST = updateHost()
+DNS_SD_HTTP_PORT = 80
+DNS_SD_HTTPS_PORT = 443
+DNS_SD_NAME = 'node_' + str(HOSTNAME) + "_" + str(getpid())
+DNS_SD_TYPE = '_nmos-node._tcp'
 
 class NodeFacadeService:
     def __init__(self, interactive=False):
@@ -81,9 +85,28 @@ class NodeFacadeService:
         self.registry_cleaner = None
         self.node_id          = None
         self.mdns             = MDNSEngine()
-        self.mdnsname_suffix  = '_' + str(HOSTNAME) + "_" + str(getpid())
-        self.mappings         = {"device": "ver_dvc", "flow": "ver_flw", "source": "ver_src", "sender":"ver_snd", "receiver":"ver_rcv", "self":"ver_slf"}
-        self.mdns_updater     = MDNSUpdater(self.mdns, "_nmos-node._tcp", "node" + self.mdnsname_suffix, self.mappings, PORT, self.logger, txt_recs={"api_ver": "v1.0,v1.1,v1.2", "api_proto": "http"})
+        self.mappings         = {"device": "ver_dvc",
+                                 "flow": "ver_flw",
+                                 "source": "ver_src",
+                                 "sender":"ver_snd",
+                                 "receiver":"ver_rcv",
+                                 "self":"ver_slf"}
+        if HTTPS_MODE == "enabled":
+            self.mdns_updater = MDNSUpdater(self.mdns,
+                                            DNS_SD_TYPE,
+                                            DNS_SD_NAME,
+                                            self.mappings,
+                                            DNS_SD_HTTPS_PORT,
+                                            self.logger,
+                                            txt_recs={"api_ver": ",".join(NODE_APIVERSIONS), "api_proto": "https"})
+        else:
+            self.mdns_updater = MDNSUpdater(self.mdns,
+                                            DNS_SD_TYPE,
+                                            DNS_SD_NAME,
+                                            self.mappings,
+                                            DNS_SD_HTTP_PORT,
+                                            self.logger,
+                                            txt_recs={"api_ver": ",".join(NODE_APIVERSIONS), "api_proto": "http"})
         self.aggregator       = Aggregator(self.logger, self.mdns_updater)
 
     def sig_handler(self):
@@ -104,13 +127,13 @@ class NodeFacadeService:
         if HTTPS_MODE != "enabled":
             endpoints.append({
                 "host" : HOST,
-                "port" : 80, #Everything should go via apache proxy
+                "port" : DNS_SD_HTTP_PORT, #Everything should go via apache proxy
                 "protocol" : "http"
             })
         if HTTPS_MODE != "disabled":
             endpoints.append({
                 "host" : HOST,
-                "port" : 443, #Everything should go via apache proxy
+                "port" : DNS_SD_HTTPS_PORT, #Everything should go via apache proxy
                 "protocol" : "https"
             })
         return endpoints
