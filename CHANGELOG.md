@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.4.2
+- Ensure manifest_href matches current protocol
+
 ## 0.4.1
 - Fix mDNS announcement port
 
