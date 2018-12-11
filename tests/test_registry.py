@@ -131,7 +131,7 @@ class TestRegistry(unittest.TestCase):
 
     def setUp(self):
         """Runs before each test"""
-        self.res_types = ["flow", "device"]
+        self.res_types = ["flow", "device", "sender"]
         self.mock_aggregator = MockAggregator()
         self.mock_mdns_updater = MockMDNSUpdater()
         self.node_data = {"label": "test", "href": "http://abcd", "host": "abcd", "services": [], "interfaces": []}
@@ -150,7 +150,6 @@ class TestRegistry(unittest.TestCase):
         """Registering a resource adds a 'node_id' property to the resource"""
         self.registry.register_resource("a", 1, "device", "device_a_key", {"label": "device_a"})
         service_resources = self.registry.list_resource("device")
-        print(service_resources)
         self.assertEqual("test_node_id", service_resources["device_a_key"]["node_id"])
 
     def test_register_calls_aggregator(self):
@@ -164,6 +163,45 @@ class TestRegistry(unittest.TestCase):
         self.registry.register_resource("a", 1, "flow", "flow_a_key", {"label": "flow_a"})
         expected_args = ('flow', 'register')
         self.assertEqual(self.mock_mdns_updater.update_mdns_invocations, [expected_args])
+
+    def test_sender_manifest_returns_http(self):
+        """Check that Sender manifest_href is not modified in HTTP mode"""
+        registry.HTTPS_MODE = "disabled"
+        self.registry.register_resource("a", 1, "sender", "sender_a_key", {"manifest_href": "http://some-url.com"})
+        sender_resources = self.registry.list_resource("sender")
+        self.assertEqual(sender_resources["sender_a_key"]["manifest_href"], "http://some-url.com")
+
+    def test_sender_manifest_returns_https(self):
+        """Check that Sender manifest_href is modified in HTTPS mode"""
+        registry.HTTPS_MODE = "enabled"
+        self.registry.register_resource("a", 1, "sender", "sender_a_key", {"manifest_href": "http://some-url.com"})
+        sender_resources = self.registry.list_resource("sender")
+        self.assertEqual(sender_resources["sender_a_key"]["manifest_href"], "https://some-url.com")
+
+    def test_device_controls_return_http(self):
+        """Check that Device control hrefs are unmodified in HTTP mode"""
+        controls = [{"type": "some-type", "href": "http://some-url.com"},
+                    {"type": "some-type", "href": "ws://some-url.com"}]
+        registry.HTTPS_MODE = "disabled"
+        self.registry.register_resource("a", 1, "device", "device_a_key", {"controls": controls,
+                                                                           "max_api_version": "v1.2"})
+        device_resources = self.registry.list_resource("device", "v1.2")
+        self.assertEqual(len(controls), len(device_resources["device_a_key"]["controls"]))
+        for control in device_resources["device_a_key"]["controls"]:
+            self.assertIn(control["href"].split(":")[0], ["http", "ws"])
+
+    def test_device_controls_return_https(self):
+        """Check that Device control hrefs are modified in HTTPS mode"""
+        controls = [{"type": "some-type", "href": "http://some-url.com"},
+                    {"type": "some-type", "href": "ws://some-url.com"}]
+        registry.HTTPS_MODE = "enabled"
+        self.registry.register_resource("a", 1, "device", "device_a_key", {"controls": controls,
+                                                                           "max_api_version": "v1.2"})
+        device_resources = self.registry.list_resource("device", "v1.2")
+        self.assertEqual(len(controls), len(device_resources["device_a_key"]["controls"]))
+        for control in device_resources["device_a_key"]["controls"]:
+            self.assertIn(control["href"].split(":")[0], ["https", "wss"])
+
 
 if __name__ == '__main__':
     unittest.main()
