@@ -27,7 +27,7 @@ import re
 import copy
 import json
 
-from nmoscommon import nmoscommonconfig
+from nmoscommon.nmoscommonconfig import config as _config
 
 try:
     # Use internal BBC RD ipputils to get PTP if available
@@ -49,7 +49,7 @@ RES_UNAUTHORISED = 3
 RES_UNSUPPORTED = 4
 RES_OTHERERROR = 5
 
-HTTPS_MODE = nmoscommonconfig.config.get('https_mode', 'disabled')
+HTTPS_MODE = _config.get('https_mode', 'disabled')
 
 
 class FacadeRegistryCleaner(threading.Thread):
