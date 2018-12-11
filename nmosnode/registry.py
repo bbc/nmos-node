@@ -440,11 +440,15 @@ class FacadeRegistry(object):
             for name in self.services:
                 if key in self.services[name]["control"] and "controls" in value_copy:
                     value_copy["controls"] = value_copy["controls"] + list(self.services[name]["control"][key].values())
+            if "controls" in value_copy and HTTPS_MODE == "enabled":
+                for control in value_copy["controls"]:
+                    control["href"] = control["href"].replace("http://", "https://")
+                    control["href"] = control["href"].replace("ws://", "wss://")
             return legalise_resource(value_copy, type, api_version)
         elif type == "sender" and HTTPS_MODE == "enabled":
             value_copy = copy.deepcopy(value)
             if "manifest_href" in value_copy:
-                value_copy["manifest_href"] = value_copy["manifest_href"].replace("http:", "https:")
+                value_copy["manifest_href"] = value_copy["manifest_href"].replace("http://", "https://")
             return legalise_resource(value_copy, type, api_version)
         else:
             return legalise_resource(value, type, api_version)
