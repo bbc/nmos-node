@@ -15,21 +15,20 @@
 from __future__ import print_function
 
 from nmoscommon.webapi import *
+from nmoscommon.webapi import WebAPI, route, resource_route, abort
 from six.moves.urllib.parse import urljoin
-import six.moves.http_client
 import requests
-from nmoscommon.utils import getLocalIP
 from socket import gethostname
-from flask import stream_with_context
 
-from nmoscommon import config as _config
+from nmoscommon.nmoscommonconfig import config as _config
 
-NODE_APIVERSIONS = _config.get('nodefacade', {}).get('NODE_APIVERSIONS', [ "v1.0", "v1.1", "v1.2" ])
+NODE_APIVERSIONS = ["v1.0", "v1.1", "v1.2"]
 NODE_REGVERSION = _config.get('nodefacade', {}).get('NODE_REGVERSION', 'v1.2')
 NODE_APINAMESPACE = "x-nmos"
 NODE_APINAME = "node"
 HOSTNAME = gethostname().split(".", 1)[0]
 RESOURCE_TYPES = ["sources", "flows", "devices", "senders", "receivers"]
+
 
 class FacadeAPI(WebAPI):
     def __init__(self, registry):
@@ -47,7 +46,7 @@ class FacadeAPI(WebAPI):
 
     @route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/")
     def nameroot(self):
-        return [ api_version + "/" for api_version in NODE_APIVERSIONS ]
+        return [api_version + "/" for api_version in NODE_APIVERSIONS]
 
     @route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/<api_version>/")
     def versionroot(self, api_version):
@@ -77,7 +76,8 @@ class FacadeAPI(WebAPI):
         else:
             abort(404)
 
-    @resource_route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/<api_version>/receivers/<receiver_id>/target", methods=['PUT'])
+    @resource_route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/<api_version>/receivers/<receiver_id>/target",
+                    methods=['PUT'])
     def receiver_id_subscription(self, api_version, receiver_id):
         if api_version not in NODE_APIVERSIONS:
             abort(404)
@@ -96,18 +96,20 @@ class FacadeAPI(WebAPI):
             abort(404)
         receiver_subs_href = "receivers/"+receiver_id+"/target"
         href = urljoin(receiver_service_href, receiver_subs_href) + "/"
-        #TODO: Handle all request types
-        #TODO: Move into proxy class?
+        # TODO: Handle all request types
+        # TODO: Move into proxy class?
 
         headers = dict(request.headers)
         headers['Accept'] = 'application/json'
         del headers['Host']
 
-        print("Sending {} request to '{}' with headers={} and data='{}'".format(request.method, href, headers, request.data))
+        print("Sending {} request to '{}' with headers={} and data='{}'".format(request.method, href,
+                                                                                headers, request.data))
 
         try:
-            resp = requests.request(request.method, href, params=request.args, data=request.data, headers=headers, allow_redirects=True, timeout=30)
-        except:
+            resp = requests.request(request.method, href, params=request.args, data=request.data, headers=headers,
+                                    allow_redirects=True, timeout=30)
+        except Exception:
             abort(500)
 
         if not resp:
@@ -123,7 +125,7 @@ class FacadeAPI(WebAPI):
             data = resp.json()
         else:
             return (204, '')
-        if(resp.status_code == 200):
+        if resp.status_code == 200:
             return (data)
         else:
             return (resp.status_code, data)

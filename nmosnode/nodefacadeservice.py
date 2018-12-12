@@ -43,7 +43,7 @@ from nmoscommon.aggregator import MDNSUpdater
 from nmoscommon.mdns   import MDNSEngine
 from nmoscommon.logger import Logger
 from nmoscommon import ptptime
-from nmoscommon import nmoscommonconfig
+from nmoscommon.nmoscommonconfig import config as _config
 import socket
 
 NS = 'urn:x-bbcrd:ips:ns:0.1'
@@ -55,14 +55,14 @@ FQDN = getfqdn()
 # enabled = Use HTTPS only in all URLs and mDNS adverts
 # disabled = Use HTTP only in all URLs and mDNS adverts
 # mixed = Use HTTP in all URLs, but additionally advertise an HTTPS endpoint for discovery of this API only
-HTTPS_MODE = nmoscommonconfig.config.get('https_mode', 'disabled')
+HTTPS_MODE = _config.get('https_mode', 'disabled')
 
 def updateHost () :
-    if nmoscommonconfig.config.get('node_hostname') is not None:
-        return nmoscommonconfig.config.get('node_hostname')
-    elif nmoscommonconfig.config.get('prefer_ipv6',False) == False:
+    if _config.get('node_hostname') is not None:
+        return _config.get('node_hostname')
+    elif _config.get('prefer_ipv6', False) is False:
         return getLocalIP()
-    else :
+    else:
         return "[" + getLocalIP(None, socket.AF_INET6) + "]"
 
 HOST = updateHost()
@@ -195,9 +195,9 @@ class NodeFacadeService:
         self.node_id = get_node_id()
         node_version = str(ptptime.ptp_detail()[0]) + ":" + str(ptptime.ptp_detail()[1])
         node_data = { "id": self.node_id,
-                      "label": nmoscommonconfig.config.get('node_label', FQDN),
-                      "description" : nmoscommonconfig.config.get('node_description', "Node on {}".format(FQDN)),
-                      "tags" : nmoscommonconfig.config.get('node_tags', {}),
+                      "label": _config.get('node_label', FQDN),
+                      "description" : _config.get('node_description', "Node on {}".format(FQDN)),
+                      "tags" : _config.get('node_tags', {}),
                       "href": self.generate_href(),
                       "host": HOST,
                       "services": [],

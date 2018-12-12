@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.4.3
+- Update method used to access config file
+
 ## 0.4.2
 - Ensure manifest_href matches current protocol
 
