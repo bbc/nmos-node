@@ -14,17 +14,13 @@
 
 from __future__ import print_function, absolute_import
 
-import time, threading, copy
+import time
+import threading
+import copy
 
 from nmoscommon.logger import Logger
 from nmoscommon import ptptime
-from copy import deepcopy
-from .api import NODE_APIVERSIONS
 from .api import NODE_REGVERSION
-from .api import NODE_APINAMESPACE
-from .api import NODE_APINAME
-import re
-import copy
 import json
 
 from nmoscommon.nmoscommonconfig import config as _config
@@ -37,10 +33,10 @@ except ImportError:
     # Library not available, use fallback
     IPP_UTILS_CLOCK_AVAILABLE = False
 
-HEARTBEAT_TIMEOUT = 12 # Seconds
-CLEANUP_INTERVAL = 5 # Seconds
+HEARTBEAT_TIMEOUT = 12  # Seconds
+CLEANUP_INTERVAL = 5  # Seconds
 
-#TODO: Enumerate return codes better?
+# TODO: Enumerate return codes better?
 
 RES_SUCCESS = 0
 RES_EXISTS = 1
@@ -78,15 +74,16 @@ def api_version_less_than(a, b):
     ver_b = b[1:].split(".")
     return ver_a[0] < ver_b[0] or (ver_a[0] == ver_b[0] and ver_a[1] < ver_b[1])
 
+
 def legalise_resource(res, rtype, api_version):
-    RESOURCE_CORE_V1_1 = [ "id",
-                           "version",
-                           "label",
-                           "description",
-                           "tags" ]
+    RESOURCE_CORE_V1_1 = ["id",
+                          "version",
+                          "label",
+                          "description",
+                          "tags"]
     # v1.0 begins
     legalkeys = {
-        ("node", "v1.0") : [
+        ("node", "v1.0"): [
             "id",
             "version",
             "label",
@@ -95,7 +92,7 @@ def legalise_resource(res, rtype, api_version):
             "caps",
             "services",
             ],
-        ("device", "v1.0") : [
+        ("device", "v1.0"): [
             "id",
             "version",
             "label",
@@ -104,7 +101,7 @@ def legalise_resource(res, rtype, api_version):
             "senders",
             "receivers"
             ],
-        ("source", "v1.0") : [
+        ("source", "v1.0"): [
             "id",
             "label",
             "description",
@@ -115,7 +112,7 @@ def legalise_resource(res, rtype, api_version):
             "version",
             "device_id",
             ],
-        ("flow", "v1.0") : [
+        ("flow", "v1.0"): [
             "id",
             "version",
             "label",
@@ -126,7 +123,7 @@ def legalise_resource(res, rtype, api_version):
             "source_id",
             "parents",
             ],
-        ("sender", "v1.0") : [
+        ("sender", "v1.0"): [
             "id",
             "version",
             "label",
@@ -137,7 +134,7 @@ def legalise_resource(res, rtype, api_version):
             "device_id",
             "manifest_href",
             ],
-        ("receiver", "v1.0") : [
+        ("receiver", "v1.0"): [
             "id",
             "version",
             "label",
@@ -153,40 +150,40 @@ def legalise_resource(res, rtype, api_version):
     # v1.0 ends
 
     # v1.1 begins
-    legalkeys[("node", "v1.1")] = ( RESOURCE_CORE_V1_1 +
-                                    legalkeys[("node", "v1.0")] +
-                                    ["api", "clocks"] )
-    legalkeys[("device", "v1.1")] = ( RESOURCE_CORE_V1_1 +
-                                      legalkeys[("device", "v1.0")] +
-                                      ["controls"] )
-    legalkeys[("source", "v1.1")] = ( RESOURCE_CORE_V1_1 +
-                                      legalkeys[("source", "v1.0")] +
-                                      ["clock_name", "grain_rate"] +
-                                      ["channels"] )
-    legalkeys[("flow", "v1.1")] = ( RESOURCE_CORE_V1_1 +
-                                    legalkeys[("flow", "v1.0")] +
-                                    ["device_id", "grain_rate", "media_type"] +
-                                    ["sample_rate", "bit_depth"] +
-                                    ["DID_SDID"] +
-                                    ["frame_width", "frame_height",
-                                     "interlace_mode", "colorspace",
-                                     "components", "transfer_characteristic"] )
-    legalkeys[("sender", "v1.1")] = ( RESOURCE_CORE_V1_1 +
-                                      legalkeys[("sender", "v1.0")] )
-    legalkeys[("receiver", "v1.1")] = ( RESOURCE_CORE_V1_1 +
-                                        legalkeys[("receiver", "v1.0")] )
+    legalkeys[("node", "v1.1")] = (RESOURCE_CORE_V1_1 +
+                                   legalkeys[("node", "v1.0")] +
+                                   ["api", "clocks"])
+    legalkeys[("device", "v1.1")] = (RESOURCE_CORE_V1_1 +
+                                     legalkeys[("device", "v1.0")] +
+                                     ["controls"])
+    legalkeys[("source", "v1.1")] = (RESOURCE_CORE_V1_1 +
+                                     legalkeys[("source", "v1.0")] +
+                                     ["clock_name", "grain_rate"] +
+                                     ["channels"])
+    legalkeys[("flow", "v1.1")] = (RESOURCE_CORE_V1_1 +
+                                   legalkeys[("flow", "v1.0")] +
+                                   ["device_id", "grain_rate", "media_type"] +
+                                   ["sample_rate", "bit_depth"] +
+                                   ["DID_SDID"] +
+                                   ["frame_width", "frame_height",
+                                    "interlace_mode", "colorspace",
+                                    "components", "transfer_characteristic"])
+    legalkeys[("sender", "v1.1")] = (RESOURCE_CORE_V1_1 +
+                                     legalkeys[("sender", "v1.0")])
+    legalkeys[("receiver", "v1.1")] = (RESOURCE_CORE_V1_1 +
+                                       legalkeys[("receiver", "v1.0")])
     # v1.1 ends
 
     # v1.2 begins
-    legalkeys[("node", "v1.2")] = ( legalkeys[("node", "v1.1")] +
-                                    ["interfaces"] )
-    legalkeys[("device", "v1.2")] = ( legalkeys[("device", "v1.1")] )
-    legalkeys[("source", "v1.2")] = ( legalkeys[("source", "v1.1")] )
-    legalkeys[("flow", "v1.2")] = ( legalkeys[("flow", "v1.1")] )
-    legalkeys[("sender", "v1.2")] = ( legalkeys[("sender", "v1.1")] +
-                                      ["interface_bindings", "subscription"] )
-    legalkeys[("receiver", "v1.2")] = ( legalkeys[("receiver", "v1.1")] +
-                                        ["interface_bindings"] )
+    legalkeys[("node", "v1.2")] = (legalkeys[("node", "v1.1")] +
+                                   ["interfaces"])
+    legalkeys[("device", "v1.2")] = (legalkeys[("device", "v1.1")])
+    legalkeys[("source", "v1.2")] = (legalkeys[("source", "v1.1")])
+    legalkeys[("flow", "v1.2")] = (legalkeys[("flow", "v1.1")])
+    legalkeys[("sender", "v1.2")] = (legalkeys[("sender", "v1.1")] +
+                                     ["interface_bindings", "subscription"])
+    legalkeys[("receiver", "v1.2")] = (legalkeys[("receiver", "v1.1")] +
+                                       ["interface_bindings"])
     # v1.2 ends
 
     if (rtype, api_version) not in legalkeys:
@@ -209,9 +206,9 @@ def legalise_resource(res, rtype, api_version):
 
     return retval
 
+
 class FacadeRegistry(object):
     def __init__(self, resources, aggregator, mdns_updater, node_id, node_data, logger=None):
-
         # `node_data` must be correctly structured
         self.permitted_resources = resources
         self.services = {}
@@ -219,7 +216,7 @@ class FacadeRegistry(object):
         self.aggregator = aggregator
         self.mdns_updater = mdns_updater
         self.node_id = node_id
-        assert("interfaces" in node_data) # Check data conforms to latest supported API version
+        assert "interfaces" in node_data  # Check data conforms to latest supported API version
         self.node_data = node_data
         self.logger = Logger("facade_registry", logger)
 
@@ -240,7 +237,8 @@ class FacadeRegistry(object):
         self.node_data["clocks"] = self.clocks.values()
         self.node_data["version"] = str(ptptime.ptp_detail()[0]) + ":" + str(ptptime.ptp_detail()[1])
         try:
-            self.aggregator.register("node", self.node_id, **self.preprocess_resource("node", self.node_data["id"], self.node_data, NODE_REGVERSION))
+            self.aggregator.register("node", self.node_id, **self.preprocess_resource("node", self.node_data["id"],
+                                     self.node_data, NODE_REGVERSION))
         except Exception as e:
             self.logger.writeError("Exception re-registering node: {}".format(e))
 
@@ -265,7 +263,7 @@ class FacadeRegistry(object):
         return RES_SUCCESS
 
     def update_service(self, name, pid, href=None, proxy_path=None):
-        if not name in self.services:
+        if name not in self.services:
             return RES_NOEXISTS
         if self.services[name]["pid"] != pid:
             return RES_UNAUTHORISED
@@ -276,7 +274,7 @@ class FacadeRegistry(object):
         return RES_SUCCESS
 
     def unregister_service(self, name, pid):
-        if not name in self.services:
+        if name not in self.services:
             return RES_NOEXISTS
         if self.services[name]["pid"] != pid:
             return RES_UNAUTHORISED
@@ -292,7 +290,7 @@ class FacadeRegistry(object):
         return RES_SUCCESS
 
     def heartbeat_service(self, name, pid):
-        if not name in self.services:
+        if name not in self.services:
             return RES_NOEXISTS
         if self.services[name]["pid"] != pid:
             return RES_UNAUTHORISED
@@ -306,7 +304,7 @@ class FacadeRegistry(object):
                 self.unregister_service(name, self.services[name]["pid"])
 
     def register_resource(self, service_name, pid, type, key, value):
-        if not type in self.permitted_resources:
+        if type not in self.permitted_resources:
             return RES_UNSUPPORTED
         return self._register(service_name, "resource", pid, type, key, value)
 
@@ -345,16 +343,16 @@ class FacadeRegistry(object):
 
             # Reset the parameters below to force re-registration of the corresponding Device
             namespace = "resource"
-            key = type # Device ID
+            key = type  # Device ID
             type = "device"
             value = None
 
-            for name in self.services: # Find the service which registered the Device in question
+            for name in self.services:  # Find the service which registered the Device in question
                 if key in self.services[name]["resource"][type]:
                     value = self.services[name]["resource"][type][key]
                     break
 
-            if not value: # Device isn't actually registered at present
+            if not value:  # Device isn't actually registered at present
                 return RES_SUCCESS
         else:
             self.services[service_name][namespace][type][key] = value
@@ -367,7 +365,8 @@ class FacadeRegistry(object):
             self.logger.writeError("Exception registering with mDNS: {}".format(e))
 
         try:
-            self.aggregator.register_into(namespace, type, key, **self.preprocess_resource(type, key, value, NODE_REGVERSION))
+            self.aggregator.register_into(namespace, type, key, **self.preprocess_resource(type, key, value,
+                                                                                           NODE_REGVERSION))
             self.logger.writeDebug("registering {} {}".format(type, key))
         except Exception as e:
             self.logger.writeError("Exception registering {}: {}".format(namespace, e))
@@ -384,7 +383,7 @@ class FacadeRegistry(object):
         return None
 
     def unregister_resource(self, service_name, pid, type, key):
-        if not type in self.permitted_resources:
+        if type not in self.permitted_resources:
             return RES_UNSUPPORTED
         return self._unregister(service_name, "resource", pid, type, key)
 
@@ -393,9 +392,9 @@ class FacadeRegistry(object):
         return self._register(service_name, "control", pid, device_id, "remove", control_data)
 
     def _unregister(self, service_name, namespace, pid, type, key):
-        if not service_name in self.services:
+        if service_name not in self.services:
             return RES_NOEXISTS
-        if not self.services[service_name]["pid"] == pid:
+        if self.services[service_name]["pid"] != pid:
             return RES_UNAUTHORISED
         if key == "00000000-0000-0000-0000-000000000000":
             return RES_OTHERERROR
@@ -414,7 +413,7 @@ class FacadeRegistry(object):
         except Exception as e:
             extype, exmsg = e
             self.logger.writeError("Exception unregistering from mDNS: {}".format(e))
-            if extype != -65548: # Name conflict
+            if extype != -65548:  # Name conflict
                 return RES_OTHERERROR
         return RES_SUCCESS
 
@@ -422,7 +421,7 @@ class FacadeRegistry(object):
         return list(self.services.keys())
 
     def get_service_href(self, name, api_version="v1.0"):
-        if not name in self.services:
+        if name not in self.services:
             return RES_NOEXISTS
         href = self.services[name]["href"]
         if self.services[name]["proxy_path"]:
@@ -430,7 +429,7 @@ class FacadeRegistry(object):
         return href
 
     def get_service_type(self, name, api_version="v1.0"):
-        if not name in self.services:
+        if name not in self.services:
             return RES_NOEXISTS
         return self.services[name]["type"]
 
@@ -454,7 +453,7 @@ class FacadeRegistry(object):
             return legalise_resource(value, type, api_version)
 
     def list_resource(self, type, api_version="v1.0"):
-        if not type in self.permitted_resources:
+        if type not in self.permitted_resources:
             return RES_UNSUPPORTED
         response = {}
         for name in self.services:
@@ -480,7 +479,7 @@ class FacadeRegistry(object):
         return response
 
     def _update_mdns(self, type):
-        if not type in self.permitted_resources:
+        if type not in self.permitted_resources:
             return RES_UNSUPPORTED
         num_items = self._len_resource(type)
         if num_items == 1:
@@ -561,10 +560,10 @@ if __name__ == "__main__":
     print("Self:", registry.list_self())
     print("Flows:", registry.list_resource("flow"))
     print("Sources:", registry.list_resource("source"))
-    print("Sleeping for", HEARTBEAT_TIMEOUT+1 ,"seconds")
+    print("Sleeping for", HEARTBEAT_TIMEOUT+1, "seconds")
     time.sleep(HEARTBEAT_TIMEOUT+1)
     registry.cleanup_services()
-    #registry.unregister_service("pipelinemanager", 100)
+    # registry.unregister_service("pipelinemanager", 100)
     print("Self:", registry.list_self())
     print("Flows:", registry.list_resource("flow"))
     print("Soures:", registry.list_resource("source"))
