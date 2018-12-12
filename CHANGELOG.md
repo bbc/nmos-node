@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.5.0
+- Add provisional support for IS-04 v1.3
+
 ## 0.4.3
 - Update method used to access config file
 
