@@ -23,6 +23,8 @@ from socket import gethostname
 from nmoscommon.nmoscommonconfig import config as _config
 
 NODE_APIVERSIONS = ["v1.0", "v1.1", "v1.2", "v1.3"]
+if _config.get("https_mode", "disabled") == "enabled":
+    NODE_APIVERSIONS.remove("v1.0")
 NODE_REGVERSION = _config.get('nodefacade', {}).get('NODE_REGVERSION', 'v1.2')
 NODE_APINAMESPACE = "x-nmos"
 NODE_APINAME = "node"
