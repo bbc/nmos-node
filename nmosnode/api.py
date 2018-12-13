@@ -22,7 +22,7 @@ from socket import gethostname
 
 from nmoscommon.nmoscommonconfig import config as _config
 
-NODE_APIVERSIONS = ["v1.0", "v1.1", "v1.2"]
+NODE_APIVERSIONS = ["v1.0", "v1.1", "v1.2", "v1.3"]
 NODE_REGVERSION = _config.get('nodefacade', {}).get('NODE_REGVERSION', 'v1.2')
 NODE_APINAMESPACE = "x-nmos"
 NODE_APINAME = "node"
