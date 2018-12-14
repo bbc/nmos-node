@@ -481,6 +481,8 @@ class FacadeRegistry(object):
     def _update_mdns(self, type):
         if type not in self.permitted_resources:
             return RES_UNSUPPORTED
+        if not self.mdns_updater:
+            return
         num_items = self._len_resource(type)
         if num_items == 1:
             try:
