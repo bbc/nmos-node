@@ -56,6 +56,7 @@ FQDN = getfqdn()
 # disabled = Use HTTP only in all URLs and mDNS adverts
 # mixed = Use HTTP in all URLs, but additionally advertise an HTTPS endpoint for discovery of this API only
 HTTPS_MODE = _config.get('https_mode', 'disabled')
+ENABLE_P2P = _config.get('node_p2p_enable', True)
 
 def updateHost () :
     if _config.get('node_hostname') is not None:
@@ -91,7 +92,8 @@ class NodeFacadeService:
                                  "sender":"ver_snd",
                                  "receiver":"ver_rcv",
                                  "self":"ver_slf"}
-        if HTTPS_MODE == "enabled":
+        self.mdns_updater = None
+        if HTTPS_MODE == "enabled" and ENABLE_P2P:
             self.mdns_updater = MDNSUpdater(self.mdns,
                                             DNS_SD_TYPE,
                                             DNS_SD_NAME,
@@ -99,7 +101,7 @@ class NodeFacadeService:
                                             DNS_SD_HTTPS_PORT,
                                             self.logger,
                                             txt_recs={"api_ver": ",".join(NODE_APIVERSIONS), "api_proto": "https"})
-        else:
+        elif ENABLE_P2P:
             self.mdns_updater = MDNSUpdater(self.mdns,
                                             DNS_SD_TYPE,
                                             DNS_SD_NAME,

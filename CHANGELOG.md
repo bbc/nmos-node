@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.7.0
+- Add mechanism to disable P2P mode support and mDNS announcement
+
 ## 0.6.0
 - Disable v1.0 API when running in HTTPS mode
 
