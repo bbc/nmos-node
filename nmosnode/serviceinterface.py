@@ -102,6 +102,10 @@ class FacadeInterface(object):
         return self.registry.list_self(api_version)
 
     @ipcmethod
+    def status_get(self, name, pid):
+        return self.registry.aggregator.status()
+
+    @ipcmethod
     def clock_register(self, clk_data):
         return self.registry.register_clock(clk_data)
 
