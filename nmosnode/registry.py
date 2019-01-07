@@ -20,6 +20,7 @@ import copy
 
 from nmoscommon.logger import Logger
 from nmoscommon import ptptime
+from nmoscommon.mdns.mdnsExceptions import ServiceAlreadyExistsException
 from .api import NODE_REGVERSION
 import json
 
@@ -410,11 +411,12 @@ class FacadeRegistry(object):
         try:
             if namespace == "resource":
                 self._update_mdns(type)
-        except Exception as e:
-            extype, exmsg = e
+        except ServiceAlreadyExistsException as e:
+            # We can't do anything about this, so just return success
             self.logger.writeError("Exception unregistering from mDNS: {}".format(e))
-            if extype != -65548:  # Name conflict
-                return RES_OTHERERROR
+        except Exception as e:
+            self.logger.writeError("Exception unregistering from mDNS: {}".format(e))
+            return RES_OTHERERROR
         return RES_SUCCESS
 
     def list_services(self, api_version="v1.0"):

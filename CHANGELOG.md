@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.7.1
+- Fix handling of mDNS exceptions following nmoscommon changes
+
 ## 0.7.0
 - Add mechanism to disable P2P mode support and mDNS announcement
 
