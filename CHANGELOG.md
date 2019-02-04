@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.8.0
+- Add basic mechanism to discover current Registration API
+
 ## 0.7.1
 - Fix handling of mDNS exceptions following nmoscommon changes
 

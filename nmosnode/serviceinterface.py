@@ -102,13 +102,20 @@ class FacadeInterface(object):
         return self.registry.list_self(api_version)
 
     @ipcmethod
-    def clock_register(self, clk_data):
+    def status_get(self, name, pid):
+        return self.registry.aggregator.status()
+
+    @ipcmethod
+    def clock_register(self, name, pid, clk_data):
+        self.logger.writeInfo("Clock Register {} {}".format(name, pid))
         return self.registry.register_clock(clk_data)
 
     @ipcmethod
-    def clock_update(self, clk_data):
+    def clock_update(self, name, pid, clk_data):
+        self.logger.writeInfo("Clock Update {} {}".format(name, pid))
         return self.registry.update_clock(clk_data)
 
     @ipcmethod
-    def clock_unregister(self, clk_name):
+    def clock_unregister(self, name, pid, clk_name):
+        self.logger.writeInfo("Clock Unregister {} {}".format(name, pid))
         return self.registry.unregister_clock(clk_name)
