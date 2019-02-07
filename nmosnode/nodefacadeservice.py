@@ -265,6 +265,7 @@ class NodeFacadeService:
         self.interface.stop()
         self.httpServer.stop()
         self.aggregator.stop()
+        self.mdns_updater.stop()
         self.logger.writeInfo("Stopped main()")
 
     def stop(self):
