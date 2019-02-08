@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.8.1
+- Call MDNSUpdater stop now required by nmoscommon
+
 ## 0.8.0
 - Add basic mechanism to discover current Registration API
 
