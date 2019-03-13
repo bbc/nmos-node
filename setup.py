@@ -64,7 +64,8 @@ packages_required = [
     "systemd",
     "nmoscommon",
     "requests",
-    "gevent"
+    "gevent",
+    "mdnsbridge"
 ]
 
 deps_required = []
