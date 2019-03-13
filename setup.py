@@ -62,7 +62,9 @@ package_names = packages.keys()
 packages_required = [
     "six",
     "systemd",
-    "nmoscommon"
+    "nmoscommon",
+    "requests",
+    "gevent"
 ]
 
 deps_required = []
