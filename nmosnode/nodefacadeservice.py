@@ -36,10 +36,10 @@ from systemd import daemon # noqa E402
 
 from .api import NODE_APIVERSIONS # noqa E402
 from .api import NODE_REGVERSION # noqa E402
+from .aggregator import Aggregator # noqa E402
+from .aggregator import MDNSUpdater # noqa E402
 
 from nmoscommon.utils import getLocalIP # noqa E402
-from nmoscommon.aggregator import Aggregator # noqa E402
-from nmoscommon.aggregator import MDNSUpdater # noqa E402
 from nmoscommon.mdns import MDNSEngine # noqa E402
 from nmoscommon.logger import Logger # noqa E402
 from nmoscommon import ptptime # noqa E402
