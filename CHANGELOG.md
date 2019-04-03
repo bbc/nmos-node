@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.8.2
+- Add support for Python 3
+
 ## 0.8.1
 - Call MDNSUpdater stop now required by nmoscommon
 
