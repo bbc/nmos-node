@@ -21,7 +21,7 @@ import os
 
 # Basic metadata
 name = "nodefacade"
-version = "0.8.1"
+version = "0.8.2"
 description = "BBC implementation of an AMWA NMOS Node API"
 url = "https://github.com/bbc/nmos-node"
 author = "Peter Brightwell"

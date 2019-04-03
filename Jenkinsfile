@@ -165,7 +165,8 @@ pipeline {
                         bbcGithubNotify(context: "pypi/upload", status: "PENDING")
                         sh 'rm -rf dist/*'
                         bbcMakeGlobalWheel("py27")
-                        bbcTwineUpload(toxenv: "py27", pypi: true)
+                        bbcMakeGlobalWheel("py3")
+                        bbcTwineUpload(toxenv: "py3", pypi: true)
                         script {
                             env.pypiUpload_result = "SUCCESS" // This will only run if the steps above succeeded
                         }
