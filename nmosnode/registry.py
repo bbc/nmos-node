@@ -315,11 +315,15 @@ class FacadeRegistry(object):
     def _register(self, service_name, namespace, pid, type, key, value):
         if namespace != "control":
             if "max_api_version" not in value:
-                self.logger.writeWarning("Service {}: Registration without valid api version specified".format(service_name))
+                self.logger.writeWarning(
+                    "Service {}: Registration without valid api version specified".format(service_name)
+                )
                 value["max_api_version"] = "v1.0"
             elif api_version_less_than(value["max_api_version"], NODE_REGVERSION):
-                self.logger.writeWarning("Trying to register resource with api version too low: '{}' : {}".format(key, json.dumps(value)))
-        if not service_name in self.services:
+                self.logger.writeWarning(
+                    "Trying to register resource with api version too low: '{}' : {}".format(key, json.dumps(value))
+                )
+        if service_name not in self.services:
             return RES_NOEXISTS
         if not self.services[service_name]["pid"] == pid:
             return RES_UNAUTHORISED

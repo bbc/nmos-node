@@ -40,7 +40,7 @@ from .api import NODE_REGVERSION
 from nmoscommon.utils import getLocalIP
 from nmoscommon.aggregator import Aggregator
 from nmoscommon.aggregator import MDNSUpdater
-from nmoscommon.mdns   import MDNSEngine
+from nmoscommon.mdns import MDNSEngine
 from nmoscommon.logger import Logger
 from nmoscommon import ptptime
 from nmoscommon.nmoscommonconfig import config as _config
@@ -58,7 +58,8 @@ FQDN = getfqdn()
 HTTPS_MODE = _config.get('https_mode', 'disabled')
 ENABLE_P2P = _config.get('node_p2p_enable', True)
 
-def updateHost () :
+
+def updateHost():
     if _config.get('node_hostname') is not None:
         return _config.get('node_hostname')
     elif _config.get('prefer_ipv6', False) is False:
@@ -66,32 +67,34 @@ def updateHost () :
     else:
         return "[" + getLocalIP(None, socket.AF_INET6) + "]"
 
+
 HOST = updateHost()
 DNS_SD_HTTP_PORT = 80
 DNS_SD_HTTPS_PORT = 443
 DNS_SD_NAME = 'node_' + str(HOSTNAME) + "_" + str(getpid())
 DNS_SD_TYPE = '_nmos-node._tcp'
 
+
 class NodeFacadeService:
     def __init__(self, interactive=False):
-        self.logger           = Logger("facade", None)
+        self.logger = Logger("facade", None)
         if HOST == "":
             self.logger.writeFatal("Unable to start facade due to lack of connectivity")
             sys.exit(1)
-        self.running          = False
-        self.httpServer       = None
-        self.interface        = None
-        self.interactive      = interactive
-        self.registry         = None
+        self.running = False
+        self.httpServer = None
+        self.interface = None
+        self.interactive = interactive
+        self.registry = None
         self.registry_cleaner = None
-        self.node_id          = None
-        self.mdns             = MDNSEngine()
-        self.mappings         = {"device": "ver_dvc",
-                                 "flow": "ver_flw",
-                                 "source": "ver_src",
-                                 "sender":"ver_snd",
-                                 "receiver":"ver_rcv",
-                                 "self":"ver_slf"}
+        self.node_id = None
+        self.mdns = MDNSEngine()
+        self.mappings = {"device": "ver_dvc",
+                                   "flow": "ver_flw",
+                                   "source": "ver_src",
+                                   "sender": "ver_snd",
+                                   "receiver": "ver_rcv",
+                                   "self": "ver_slf"}
         self.mdns_updater = None
         if HTTPS_MODE == "enabled" and ENABLE_P2P:
             self.mdns_updater = MDNSUpdater(self.mdns,
@@ -109,7 +112,7 @@ class NodeFacadeService:
                                             DNS_SD_HTTP_PORT,
                                             self.logger,
                                             txt_recs={"api_ver": ",".join(NODE_APIVERSIONS), "api_proto": "http"})
-        self.aggregator       = Aggregator(self.logger, self.mdns_updater)
+        self.aggregator = Aggregator(self.logger, self.mdns_updater)
 
     def sig_handler(self):
         print('Pressed ctrl+c')
@@ -128,15 +131,15 @@ class NodeFacadeService:
         endpoints = []
         if HTTPS_MODE != "enabled":
             endpoints.append({
-                "host" : HOST,
-                "port" : DNS_SD_HTTP_PORT, #Everything should go via apache proxy
-                "protocol" : "http"
+                "host": HOST,
+                "port": DNS_SD_HTTP_PORT,  # Everything should go via apache proxy
+                "protocol": "http"
             })
         if HTTPS_MODE != "disabled":
             endpoints.append({
-                "host" : HOST,
-                "port" : DNS_SD_HTTPS_PORT, #Everything should go via apache proxy
-                "protocol" : "https"
+                "host": HOST,
+                "port": DNS_SD_HTTPS_PORT,  # Everything should go via apache proxy
+                "protocol": "https"
             })
         return endpoints
 
@@ -196,24 +199,29 @@ class NodeFacadeService:
         self.mdns.start()
         self.node_id = get_node_id()
         node_version = str(ptptime.ptp_detail()[0]) + ":" + str(ptptime.ptp_detail()[1])
-        node_data = { "id": self.node_id,
-                      "label": _config.get('node_label', FQDN),
-                      "description" : _config.get('node_description', "Node on {}".format(FQDN)),
-                      "tags" : _config.get('node_tags', {}),
-                      "href": self.generate_href(),
-                      "host": HOST,
-                      "services": [],
-                      "hostname": HOSTNAME,
-                      "caps": {},
-                      "version": node_version,
-                      "api" : {
-                          "versions" : NODE_APIVERSIONS,
-                          "endpoints" : self.generate_endpoints(),
-                      },
-                      "clocks" : [],
-                      "interfaces": self.list_interfaces()
-        }
-        self.registry = FacadeRegistry(self.mappings.keys(), self.aggregator, self.mdns_updater, self.node_id, node_data, self.logger)
+        node_data = {"id": self.node_id,
+                     "label": _config.get('node_label', FQDN),
+                     "description": _config.get('node_description', "Node on {}".format(FQDN)),
+                     "tags": _config.get('node_tags', {}),
+                     "href": self.generate_href(),
+                     "host": HOST,
+                     "services": [],
+                     "hostname": HOSTNAME,
+                     "caps": {},
+                     "version": node_version,
+                     "api": {
+                            "versions": NODE_APIVERSIONS,
+                            "endpoints": self.generate_endpoints(),
+                            },
+                     "clocks": [],
+                     "interfaces": self.list_interfaces()
+                     }
+        self.registry = FacadeRegistry(self.mappings.keys(),
+                                       self.aggregator,
+                                       self.mdns_updater,
+                                       self.node_id,
+                                       node_data,
+                                       self.logger)
         self.registry_cleaner = FacadeRegistryCleaner(self.registry)
         self.registry_cleaner.start()
         self.httpServer = HttpServer(FacadeAPI, PORT, '0.0.0.0', api_args=[self.registry])
@@ -270,3 +278,8 @@ class NodeFacadeService:
 
     def stop(self):
         self.running = False
+
+
+if __name__ == '__main__':
+    Service = NodeFacadeService()
+    Service.run()

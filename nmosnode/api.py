@@ -14,7 +14,7 @@
 
 from __future__ import print_function
 
-from nmoscommon.webapi import *
+from flask import request
 from nmoscommon.webapi import WebAPI, route, resource_route, abort
 from six.moves.urllib.parse import urljoin
 import requests
@@ -98,8 +98,8 @@ class FacadeAPI(WebAPI):
             abort(404)
         receiver_subs_href = "receivers/"+receiver_id+"/target"
         href = urljoin(receiver_service_href, receiver_subs_href) + "/"
-        # TODO: Handle all request types
-        # TODO: Move into proxy class?
+        # TODO Handle all request types
+        # TODO Move into proxy class?
 
         headers = dict(request.headers)
         headers['Accept'] = 'application/json'

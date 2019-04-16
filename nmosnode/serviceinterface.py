@@ -15,16 +15,18 @@
 from nmoscommon.ipc import Host
 from nmoscommon.logger import Logger
 
-ADDRESS="ipc:///tmp/ips-nodefacade"
+ADDRESS = "ipc:///tmp/ips-nodefacade"
+
 
 def ipcmethod(name=None):
     def decorator(function):
         function.ipc_method = True
-        function.ipc_name   = name
+        function.ipc_name = name
         return function
     if callable(name):
         return decorator(name)
     return decorator
+
 
 class FacadeInterface(object):
     def __init__(self, registry, logger):
@@ -38,7 +40,7 @@ class FacadeInterface(object):
                 bases += getbases(x)
             return bases
 
-        for cl in [self.__class__,] + getbases(self.__class__):
+        for cl in [self.__class__, ] + getbases(self.__class__):
             for name in cl.__dict__.keys():
                 value = getattr(self, name)
                 if callable(value):
@@ -56,7 +58,7 @@ class FacadeInterface(object):
         self.logger.writeInfo("Service Register {}, {}, {}, {}, {}".format(name, srv_type, pid, href, proxy_path))
         return self.registry.register_service(name, srv_type, pid, href, proxy_path)
 
-    #TODO: =None should be removed once proxying removed from node facade
+    # TODO: =None should be removed once proxying removed from node facade
     @ipcmethod
     def srv_update(self, name, pid, href, proxy_path):
         self.logger.writeInfo("Service Update {}, {}, {}, {}".format(name, pid, href, proxy_path))
