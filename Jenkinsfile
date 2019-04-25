@@ -36,7 +36,7 @@ pipeline {
     stages {
         stage("Clean Environment") {
             steps {
-                sh 'git clean -df'
+                sh 'git clean -dfx'
             }
         }
         stage ("Tests") {
