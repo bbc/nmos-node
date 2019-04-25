@@ -42,6 +42,7 @@ class MockAggregator:
     def unregister_from(self, *args, **kwargs):
         self.unregister_invocations.append([args, kwargs])
 
+
 class MockMDNSUpdater:
 
     def __init__(self):
@@ -57,7 +58,9 @@ class TestRegistryServices(unittest.TestCase):
     def setUp(self):
         """Runs before each test"""
         self.res_types = ["flow", "device"]
-        self.node_data = {"label": "test_node", "href": 'http://127.0.0.1:88/', "host": "127.0.0.1", "services": [], "interfaces": []}
+        self.node_data = {
+            "label": "test_node", "href": 'http://127.0.0.1:88/', "host": "127.0.0.1", "services": [], "interfaces": []
+        }
         self.registry = registry.FacadeRegistry(self.res_types, MockAggregator(),
                                                 MockMDNSUpdater(), "test_node_id", self.node_data)
 
@@ -66,7 +69,7 @@ class TestRegistryServices(unittest.TestCase):
         self.assertEqual(registry.RES_SUCCESS, r)
         self.assertIn("test_srv", self.registry.list_services())
         self.assertEqual("http://127.0.0.1:12345", self.registry.get_service_href("test_srv"))
-        service = self.registry.services["test_srv"] # TODO: Does this expose too much guts?
+        service = self.registry.services["test_srv"]  # TODO: Does this expose too much guts?
         self.assertEqual(100, service["pid"])        # TODO: Need for "get_service_pid"?
         self.assertIn("resource", service)
         for rtype in self.res_types:

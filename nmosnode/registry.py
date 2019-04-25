@@ -92,7 +92,7 @@ def legalise_resource(res, rtype, api_version):
             "hostname",
             "caps",
             "services",
-            ],
+        ],
         ("device", "v1.0"): [
             "id",
             "version",
@@ -101,7 +101,7 @@ def legalise_resource(res, rtype, api_version):
             "node_id",
             "senders",
             "receivers"
-            ],
+        ],
         ("source", "v1.0"): [
             "id",
             "label",
@@ -112,7 +112,7 @@ def legalise_resource(res, rtype, api_version):
             "parents",
             "version",
             "device_id",
-            ],
+        ],
         ("flow", "v1.0"): [
             "id",
             "version",
@@ -123,7 +123,7 @@ def legalise_resource(res, rtype, api_version):
             "tags",
             "source_id",
             "parents",
-            ],
+        ],
         ("sender", "v1.0"): [
             "id",
             "version",
@@ -134,7 +134,7 @@ def legalise_resource(res, rtype, api_version):
             "tags",
             "device_id",
             "manifest_href",
-            ],
+        ],
         ("receiver", "v1.0"): [
             "id",
             "version",
@@ -146,7 +146,7 @@ def legalise_resource(res, rtype, api_version):
             "device_id",
             "transport",
             "subscription"
-            ]
+        ]
     }
     # v1.0 ends
 
@@ -463,19 +463,13 @@ class FacadeRegistry(object):
             return RES_UNSUPPORTED
         response = {}
         for name in self.services:
-            response = (dict(list(response.items()) +
-                        [
-                            (k, self.preprocess_resource(type, k, x, api_version))
-                            for (k, x) in self.services[name]["resource"][type].items()
-                            if (
-                                api_version == "v1.0" or
-                                (
-                                    "max_api_version" in x and
-                                    not api_version_less_than(x["max_api_version"], api_version)
-                                )
-                            )
-                        ]
-                    ))
+            response = (dict(list(response.items()) + [
+                (k, self.preprocess_resource(type, k, x, api_version))
+                for (k, x) in self.services[name]["resource"][type].items()
+                if (api_version == "v1.0" or (
+                    "max_api_version" in x and not api_version_less_than(x["max_api_version"], api_version)
+                ))
+            ]))
         return response
 
     def _len_resource(self, type):
@@ -568,8 +562,8 @@ if __name__ == "__main__":
     print("Self:", registry.list_self())
     print("Flows:", registry.list_resource("flow"))
     print("Sources:", registry.list_resource("source"))
-    print("Sleeping for", HEARTBEAT_TIMEOUT+1, "seconds")
-    time.sleep(HEARTBEAT_TIMEOUT+1)
+    print("Sleeping for", HEARTBEAT_TIMEOUT + 1, "seconds")
+    time.sleep(HEARTBEAT_TIMEOUT + 1)
     registry.cleanup_services()
     # registry.unregister_service("pipelinemanager", 100)
     print("Self:", registry.list_self())

@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.8.3
+- Added linting stage to CI and .flake8 file, fixed linting
+
 ## 0.8.2
 - Add support for Python 3
 

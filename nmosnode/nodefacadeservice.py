@@ -18,33 +18,33 @@ import gevent
 from gevent import monkey
 monkey.patch_all()
 
-import time
-import signal
-import os
-import sys
-import json
+import time # noqa E402
+import signal # noqa E402
+import os  # noqa E402
+import sys # noqa E402
+import json # noqa E402
 
-from nmoscommon.httpserver import HttpServer
-from nmoscommon.utils import get_node_id
-from socket import gethostname, getfqdn
-from .api import FacadeAPI
-from .registry import FacadeRegistry, FacadeRegistryCleaner, legalise_resource
-from .serviceinterface import FacadeInterface
-from os import getpid
-from subprocess import check_output
-from systemd import daemon
+from nmoscommon.httpserver import HttpServer # noqa E402
+from nmoscommon.utils import get_node_id # noqa E402
+from socket import gethostname, getfqdn # noqa E402
+from .api import FacadeAPI # noqa E402
+from .registry import FacadeRegistry, FacadeRegistryCleaner, legalise_resource # noqa E402
+from .serviceinterface import FacadeInterface # noqa E402
+from os import getpid # noqa E402
+from subprocess import check_output # noqa E402
+from systemd import daemon # noqa E402
 
-from .api import NODE_APIVERSIONS
-from .api import NODE_REGVERSION
+from .api import NODE_APIVERSIONS # noqa E402
+from .api import NODE_REGVERSION # noqa E402
 
-from nmoscommon.utils import getLocalIP
-from nmoscommon.aggregator import Aggregator
-from nmoscommon.aggregator import MDNSUpdater
-from nmoscommon.mdns import MDNSEngine
-from nmoscommon.logger import Logger
-from nmoscommon import ptptime
-from nmoscommon.nmoscommonconfig import config as _config
-import socket
+from nmoscommon.utils import getLocalIP # noqa E402
+from nmoscommon.aggregator import Aggregator # noqa E402
+from nmoscommon.aggregator import MDNSUpdater # noqa E402
+from nmoscommon.mdns import MDNSEngine # noqa E402
+from nmoscommon.logger import Logger # noqa E402
+from nmoscommon import ptptime # noqa E402
+from nmoscommon.nmoscommonconfig import config as _config # noqa E402
+import socket # noqa E402
 
 NS = 'urn:x-bbcrd:ips:ns:0.1'
 PORT = 12345
@@ -192,30 +192,31 @@ class NodeFacadeService:
 
     def start(self):
         if self.running:
-            gevent.signal(signal.SIGINT,  self.sig_handler)
+            gevent.signal(signal.SIGINT, self.sig_handler)
             gevent.signal(signal.SIGTERM, self.sig_handler)
             gevent.signal(signal.SIGHUP, self.sig_hup_handler)
 
         self.mdns.start()
         self.node_id = get_node_id()
         node_version = str(ptptime.ptp_detail()[0]) + ":" + str(ptptime.ptp_detail()[1])
-        node_data = {"id": self.node_id,
-                     "label": _config.get('node_label', FQDN),
-                     "description": _config.get('node_description', "Node on {}".format(FQDN)),
-                     "tags": _config.get('node_tags', {}),
-                     "href": self.generate_href(),
-                     "host": HOST,
-                     "services": [],
-                     "hostname": HOSTNAME,
-                     "caps": {},
-                     "version": node_version,
-                     "api": {
-                            "versions": NODE_APIVERSIONS,
-                            "endpoints": self.generate_endpoints(),
-                            },
-                     "clocks": [],
-                     "interfaces": self.list_interfaces()
-                     }
+        node_data = {
+            "id": self.node_id,
+            "label": _config.get('node_label', FQDN),
+            "description": _config.get('node_description', "Node on {}".format(FQDN)),
+            "tags": _config.get('node_tags', {}),
+            "href": self.generate_href(),
+            "host": HOST,
+            "services": [],
+            "hostname": HOSTNAME,
+            "caps": {},
+            "version": node_version,
+            "api": {
+                "versions": NODE_APIVERSIONS,
+                "endpoints": self.generate_endpoints(),
+            },
+            "clocks": [],
+            "interfaces": self.list_interfaces()
+        }
         self.registry = FacadeRegistry(self.mappings.keys(),
                                        self.aggregator,
                                        self.mdns_updater,

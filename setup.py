@@ -21,7 +21,7 @@ import os
 
 # Basic metadata
 name = "nodefacade"
-version = "0.8.2"
+version = "0.8.3"
 description = "BBC implementation of an AMWA NMOS Node API"
 url = "https://github.com/bbc/nmos-node"
 author = "Peter Brightwell"
@@ -37,7 +37,7 @@ def is_package(path):
     return (
         os.path.isdir(path) and
         os.path.isfile(os.path.join(path, '__init__.py'))
-        )
+    )
 
 
 def find_packages(path, base=""):
@@ -67,19 +67,20 @@ packages_required = [
 
 deps_required = []
 
-setup(name=name,
-      version=version,
-      description=description,
-      url=url,
-      author=author,
-      author_email=author_email,
-      license=licence,
-      packages=package_names,
-      package_dir=packages,
-      install_requires=packages_required,
-      scripts=[],
-      data_files=[
-          ('/usr/bin', ['bin/nmosnode'])
-      ],
-      long_description=long_description
-      )
+setup(
+    name=name,
+    version=version,
+    description=description,
+    url=url,
+    author=author,
+    author_email=author_email,
+    license=licence,
+    packages=package_names,
+    package_dir=packages,
+    install_requires=packages_required,
+    scripts=[],
+    data_files=[
+        ('/usr/bin', ['bin/nmosnode'])
+    ],
+    long_description=long_description
+)

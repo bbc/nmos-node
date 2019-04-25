@@ -28,6 +28,7 @@ if _config.get("https_mode", "disabled") == "enabled":
 NODE_REGVERSION = _config.get('nodefacade', {}).get('NODE_REGVERSION', 'v1.2')
 NODE_APINAMESPACE = "x-nmos"
 NODE_APINAME = "node"
+NODE_APIROOT = '/' + NODE_APINAMESPACE + '/' + NODE_APINAME + '/'
 HOSTNAME = gethostname().split(".", 1)[0]
 RESOURCE_TYPES = ["sources", "flows", "devices", "senders", "receivers"]
 
@@ -40,23 +41,23 @@ class FacadeAPI(WebAPI):
 
     @route('/')
     def root(self):
-        return [NODE_APINAMESPACE+"/"]
+        return [NODE_APINAMESPACE + "/"]
 
-    @route('/'+NODE_APINAMESPACE+'/')
+    @route('/' + NODE_APINAMESPACE + '/')
     def namespaceroot(self):
-        return [NODE_APINAME+"/"]
+        return [NODE_APINAME + "/"]
 
-    @route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/")
+    @route(NODE_APIROOT)
     def nameroot(self):
         return [api_version + "/" for api_version in NODE_APIVERSIONS]
 
-    @route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/<api_version>/")
+    @route(NODE_APIROOT + "<api_version>/")
     def versionroot(self, api_version):
         if api_version not in NODE_APIVERSIONS:
             abort(404)
         return ["self/", "sources/", "flows/", "devices/", "senders/", "receivers/"]
 
-    @resource_route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/<api_version>/<resource_type>/")
+    @resource_route(NODE_APIROOT + "<api_version>/<resource_type>/")
     def resource_list(self, api_version, resource_type):
         if api_version not in NODE_APIVERSIONS:
             abort(404)
@@ -66,7 +67,7 @@ class FacadeAPI(WebAPI):
             abort(404)
         return self.registry.list_resource(resource_type.rstrip("s"), api_version=api_version).values()
 
-    @resource_route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/<api_version>/<resource_type>/<resource_id>/")
+    @resource_route(NODE_APIROOT + "<api_version>/<resource_type>/<resource_id>/")
     def resource_id(self, api_version, resource_type, resource_id):
         if api_version not in NODE_APIVERSIONS:
             abort(404)
@@ -78,7 +79,7 @@ class FacadeAPI(WebAPI):
         else:
             abort(404)
 
-    @resource_route('/'+NODE_APINAMESPACE+'/'+NODE_APINAME+"/<api_version>/receivers/<receiver_id>/target",
+    @resource_route(NODE_APIROOT + "<api_version>/receivers/<receiver_id>/target",
                     methods=['PUT'])
     def receiver_id_subscription(self, api_version, receiver_id):
         if api_version not in NODE_APIVERSIONS:
@@ -96,7 +97,7 @@ class FacadeAPI(WebAPI):
         if str(receiver_service_href).isdigit():
             # Service doesn't exist
             abort(404)
-        receiver_subs_href = "receivers/"+receiver_id+"/target"
+        receiver_subs_href = "receivers/" + receiver_id + "/target"
         href = urljoin(receiver_service_href, receiver_subs_href) + "/"
         # TODO Handle all request types
         # TODO Move into proxy class?
@@ -119,7 +120,7 @@ class FacadeAPI(WebAPI):
 
         print(resp)
 
-        if resp.status_code/100 != 2:
+        if resp.status_code / 100 != 2:
             abort(resp.status_code)
 
         data = {}
