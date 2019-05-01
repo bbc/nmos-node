@@ -62,6 +62,8 @@ ENABLE_P2P = _config.get('node_p2p_enable', True)
 def updateHost():
     if _config.get('node_hostname') is not None:
         return _config.get('node_hostname')
+    elif _config.get('prefer_hostnames', False) is True:
+        return FQDN
     elif _config.get('prefer_ipv6', False) is False:
         return getLocalIP()
     else:

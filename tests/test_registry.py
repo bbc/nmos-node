@@ -172,14 +172,16 @@ class TestRegistry(unittest.TestCase):
         registry.HTTPS_MODE = "disabled"
         self.registry.register_resource("a", 1, "sender", "sender_a_key", {"manifest_href": "http://some-url.com"})
         sender_resources = self.registry.list_resource("sender")
-        self.assertEqual(sender_resources["sender_a_key"]["manifest_href"], "http://some-url.com")
+        scheme = sender_resources["sender_a_key"]["manifest_href"].split("://")[0]
+        self.assertEqual(scheme, "http")
 
     def test_sender_manifest_returns_https(self):
         """Check that Sender manifest_href is modified in HTTPS mode"""
         registry.HTTPS_MODE = "enabled"
         self.registry.register_resource("a", 1, "sender", "sender_a_key", {"manifest_href": "http://some-url.com"})
         sender_resources = self.registry.list_resource("sender")
-        self.assertEqual(sender_resources["sender_a_key"]["manifest_href"], "https://some-url.com")
+        scheme = sender_resources["sender_a_key"]["manifest_href"].split("://")[0]
+        self.assertEqual(scheme, "https")
 
     def test_device_controls_return_http(self):
         """Check that Device control hrefs are unmodified in HTTP mode"""
@@ -191,7 +193,7 @@ class TestRegistry(unittest.TestCase):
         device_resources = self.registry.list_resource("device", "v1.2")
         self.assertEqual(len(controls), len(device_resources["device_a_key"]["controls"]))
         for control in device_resources["device_a_key"]["controls"]:
-            self.assertIn(control["href"].split(":")[0], ["http", "ws"])
+            self.assertIn(control["href"].split("://")[0], ["http", "ws"])
 
     def test_device_controls_return_https(self):
         """Check that Device control hrefs are modified in HTTPS mode"""
@@ -203,7 +205,7 @@ class TestRegistry(unittest.TestCase):
         device_resources = self.registry.list_resource("device", "v1.2")
         self.assertEqual(len(controls), len(device_resources["device_a_key"]["controls"]))
         for control in device_resources["device_a_key"]["controls"]:
-            self.assertIn(control["href"].split(":")[0], ["https", "wss"])
+            self.assertIn(control["href"].split("://")[0], ["https", "wss"])
 
 
 if __name__ == '__main__':

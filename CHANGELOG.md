@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.9.0
+- Use nmoscommon prefer_hostnames/node_hostname to inform all absolute hrefs
+
 ## 0.8.3
 - Added linting stage to CI and .flake8 file, fixed linting
 

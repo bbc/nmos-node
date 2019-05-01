@@ -18,6 +18,7 @@ import time
 import threading
 import copy
 
+from six.moves.urllib.parse import urlparse, urlunparse
 from nmoscommon.logger import Logger
 from nmoscommon import ptptime
 from nmoscommon.mdns.mdnsExceptions import ServiceAlreadyExistsException
@@ -439,21 +440,34 @@ class FacadeRegistry(object):
             return RES_NOEXISTS
         return self.services[name]["type"]
 
+    def preprocess_url(self, url):
+        parsed_url = urlparse(url)
+        scheme = parsed_url.scheme
+        if HTTPS_MODE == "enabled":
+            if scheme == "http":
+                scheme = "https"
+            elif scheme == "ws":
+                scheme = "wss"
+        netloc = self.node_data["host"]
+        if parsed_url.port:
+            netloc += ":{}".format(parsed_url.port)
+        parsed_url = parsed_url._replace(netloc=netloc, scheme=scheme)
+        return urlunparse(parsed_url)
+
     def preprocess_resource(self, type, key, value, api_version="v1.0"):
         if type == "device":
             value_copy = copy.deepcopy(value)
             for name in self.services:
                 if key in self.services[name]["control"] and "controls" in value_copy:
                     value_copy["controls"] = value_copy["controls"] + list(self.services[name]["control"][key].values())
-            if "controls" in value_copy and HTTPS_MODE == "enabled":
+            if "controls" in value_copy:
                 for control in value_copy["controls"]:
-                    control["href"] = control["href"].replace("http://", "https://")
-                    control["href"] = control["href"].replace("ws://", "wss://")
+                    control["href"] = self.preprocess_url(control["href"])
             return legalise_resource(value_copy, type, api_version)
-        elif type == "sender" and HTTPS_MODE == "enabled":
+        elif type == "sender":
             value_copy = copy.deepcopy(value)
             if "manifest_href" in value_copy:
-                value_copy["manifest_href"] = value_copy["manifest_href"].replace("http://", "https://")
+                value_copy["manifest_href"] = self.preprocess_url(value_copy["manifest_href"])
             return legalise_resource(value_copy, type, api_version)
         else:
             return legalise_resource(value, type, api_version)
