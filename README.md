@@ -25,6 +25,10 @@ $ pip install setuptools
 $ sudo python setup.py install
 ```
 
+## Configuration
+
+The Node API makes use of a configuration file provided by the [NMOS Common Library](https://github.com/bbc/nmos-common). Please see that repository for configuration details.
+
 ### Usage
 
 ### Non-blocking
