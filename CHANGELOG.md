@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.9.1
+- Fix missing files in Python 3 Debian package
+
 ## 0.9.0
 - Use nmoscommon prefer_hostnames/node_hostname to inform all absolute hrefs
 
