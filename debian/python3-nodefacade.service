@@ -1,0 +1,15 @@
+[Unit]
+Description=ips-nodefacade
+Wants=network-online.target avahi-daemon.service apache2.service
+After=network.target network-online.target avahi-daemon.service apache2.service
+
+[Service]
+Type=notify
+User=ipstudio
+Restart=always
+RestartSec=3
+ExecStart=/usr/bin/nmosnode
+
+[Install]
+WantedBy=multi-user.target
+Alias=nmos-node.service ips-nodefacade.service
