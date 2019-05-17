@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.9.2
+- Add Python3 linting stage to CI, fix linting
+
 ## 0.9.1
 - Fix missing files in Python 3 Debian package
 

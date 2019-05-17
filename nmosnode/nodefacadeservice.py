@@ -250,7 +250,8 @@ class NodeFacadeService:
     def run(self):
         self.running = True
         pidfile = "/tmp/ips-nodefacade.pid"
-        file(pidfile, 'w').write(str(getpid()))
+        with open(pidfile, 'w') as f:
+            f.write(str(getpid()))
         self.start()
         daemon.notify("READY=1")
         while self.running:
