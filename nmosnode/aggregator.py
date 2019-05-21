@@ -12,22 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from six import itervalues
-from six.moves.urllib.parse import urljoin
-
-import requests
-import json
-import time
-
 import gevent
-import gevent.queue
+from gevent import monkey
+monkey.patch_all()
 
-from nmoscommon.logger import Logger
-from mdnsbridge.mdnsbridgeclient import IppmDNSBridge
-from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException
+from six import itervalues # noqa E402
+from six.moves.urllib.parse import urljoin # noqa E402
 
-from nmoscommon.nmoscommonconfig import config as _config
-import traceback
+import requests # noqa E402
+import json # noqa E402
+import time # noqa E402
+
+import gevent.queue # noqa E402
+
+from nmoscommon.logger import Logger # noqa E402
+from mdnsbridge.mdnsbridgeclient import IppmDNSBridge # noqa E402
+from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException # noqa E402
+
+from nmoscommon.nmoscommonconfig import config as _config # noqa E402
+import traceback # noqa E402
 
 AGGREGATOR_APIVERSION = _config.get('nodefacade').get('NODE_REGVERSION')
 AGGREGATOR_APINAMESPACE = "x-nmos"
