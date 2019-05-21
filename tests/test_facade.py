@@ -18,7 +18,7 @@ from six import PY2
 from six import iteritems
 import unittest
 import mock
-from nmosnode.facade import *
+from nmosnode.facade import Facade, FAC_SUCCESS, FAC_OTHERERROR
 
 
 class TestFacade(unittest.TestCase):

@@ -20,7 +20,7 @@ from six import PY2
 import unittest
 import mock
 import time
-from nmosnode.aggregator import *
+from nmosnode.aggregator import MDNSUpdater, Aggregator
 import nmoscommon.logger
 from nmoscommon import nmoscommonconfig
 
