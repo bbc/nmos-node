@@ -23,7 +23,7 @@ import gevent
 import gevent.queue
 
 from nmoscommon.logger import Logger
-from nmoscommon.mdnsbridge import IppmDNSBridge
+from mdnsbridge.mdnsbridgeclient import IppmDNSBridge
 from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException
 
 from nmoscommon.nmoscommonconfig import config as _config
