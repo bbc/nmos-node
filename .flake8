@@ -6,3 +6,4 @@ exclude =
     dist,
     deb_dist,
     __pycache__
+    tests
