@@ -179,7 +179,8 @@ class Aggregator(object):
                         self._mdns_updater.P2P_disable()
         self.logger.writeDebug("Stopping HTTP queue processing thread")
 
-    # Queue a request to be processed. Handles all requests except initial Node POST which is done in _process_reregister
+    # Queue a request to be processed.
+    # Handles all requests except initial Node POST which is done in _process_reregister
     def _queue_request(self, method, namespace, res_type, key):
         self._reg_queue.put({"method": method, "namespace": namespace, "res_type": res_type, "key": key})
 
