@@ -15,13 +15,11 @@
 from __future__ import absolute_import
 from __future__ import print_function
 import gevent
-from gevent import monkey
-monkey.patch_all()
-import os # noqa E402
-from nmoscommon.ipc import Proxy # noqa E402
-from threading import Lock # noqa E402
-from nmoscommon.logger import Logger # noqa E402
-from copy import deepcopy # noqa E402
+import os
+from nmoscommon.ipc import Proxy
+from threading import Lock
+from nmoscommon.logger import Logger
+from copy import deepcopy
 
 FAC_SUCCESS = 0
 FAC_EXISTS = 1
