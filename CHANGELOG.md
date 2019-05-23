@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.10.1
+- Fix incompatibility introduced in facade class during move
+
 ## 0.10.0
 - Add aggregator and facade classes from nmos-common
 
