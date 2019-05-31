@@ -21,7 +21,7 @@ import os
 
 # Basic metadata
 name = "nodefacade"
-version = "0.10.1"
+version = "0.10.2"
 description = "BBC implementation of an AMWA NMOS Node API"
 url = "https://github.com/bbc/nmos-node"
 author = "Peter Brightwell"
@@ -61,7 +61,7 @@ package_names = packages.keys()
 # REMEMBER: If this list is updated, please also update stdeb.cfg and the RPM specfile
 packages_required = [
     "six",
-    "systemd",
+    "cysystemd",
     "nmoscommon",
     "requests",
     "gevent",
