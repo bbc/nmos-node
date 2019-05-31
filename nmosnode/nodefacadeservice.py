@@ -32,7 +32,14 @@ from .registry import FacadeRegistry, FacadeRegistryCleaner, legalise_resource #
 from .serviceinterface import FacadeInterface # noqa E402
 from os import getpid # noqa E402
 from subprocess import check_output # noqa E402
-from systemd import daemon # noqa E402
+# Handle if systemd is installed instead of newer cysystemd
+# noqa E402
+try:
+    from cysystemd import daemon
+    SYSTEMD_READY = daemon.Notification.READY
+except ImportError:
+    from systemd import daemon
+    SYSTEMD_READY = "READY=1"
 
 from .api import NODE_APIVERSIONS # noqa E402
 from .api import NODE_REGVERSION # noqa E402
@@ -253,7 +260,7 @@ class NodeFacadeService:
         with open(pidfile, 'w') as f:
             f.write(str(getpid()))
         self.start()
-        daemon.notify("READY=1")
+        daemon.notify(SYSTEMD_READY)
         while self.running:
             self.registry.update_ptp()
             time.sleep(1)

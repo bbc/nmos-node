@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.10.2
+- Use newer cysystemd instead of systemd
+
 ## 0.10.1
 - Fix incompatibility introduced in facade class during move
 
