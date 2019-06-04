@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.10.3
+- Move NMOS packages from recommends to depends
+
 ## 0.10.2
 - Use newer cysystemd instead of systemd
 
