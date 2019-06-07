@@ -197,7 +197,7 @@ class NodeFacadeService:
             except Exception:
                 pass
 
-        return interfaces.values()
+        return list(interfaces)
 
     def start(self):
         if self.running:
