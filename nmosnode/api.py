@@ -65,7 +65,7 @@ class FacadeAPI(WebAPI):
             return self.registry.list_self(api_version=api_version)
         elif resource_type not in RESOURCE_TYPES:
             abort(404)
-        return self.registry.list_resource(resource_type.rstrip("s"), api_version=api_version).values()
+        return list(self.registry.list_resource(resource_type.rstrip("s"), api_version=api_version))
 
     @resource_route(NODE_APIROOT + "<api_version>/<resource_type>/<resource_id>/")
     def resource_id(self, api_version, resource_type, resource_id):
