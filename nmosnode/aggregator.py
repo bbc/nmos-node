@@ -359,7 +359,7 @@ class Aggregator(object):
                 elif R.status_code == 204:
                     return
 
-                elif (R.status_code/100) == 4:
+                elif (R.status_code//100) == 4:
                     self.logger.writeWarning("{} response from aggregator: {} {}"
                                              .format(R.status_code, method, urljoin(self.aggregator, url)))
                     raise InvalidRequest(R.status_code, self._mdns_updater)

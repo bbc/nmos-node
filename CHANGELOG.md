@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.10.5
+- Fix bug with python 3 division and list iterators
+
 ## 0.10.4
 - Fix bug when using python 3 where .values() returns dict_values object instead of list
 
