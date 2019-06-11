@@ -23,7 +23,7 @@ import signal # noqa E402
 import os  # noqa E402
 import sys # noqa E402
 import json # noqa E402
-from six import itervalues
+from six import itervalues # noqa E402
 
 from nmoscommon.httpserver import HttpServer # noqa E402
 from nmoscommon.utils import get_node_id # noqa E402
