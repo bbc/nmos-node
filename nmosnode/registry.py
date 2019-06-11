@@ -19,6 +19,7 @@ import threading
 import copy
 
 from six.moves.urllib.parse import urlparse, urlunparse
+from six import itervalues
 from nmoscommon.logger import Logger
 from nmoscommon import ptptime
 from nmoscommon.mdns.mdnsExceptions import ServiceAlreadyExistsException
@@ -236,7 +237,7 @@ class FacadeRegistry(object):
                 if self.services[service_name]["proxy_path"]:
                     href = self.node_data["href"] + self.services[service_name]["proxy_path"]
             self.node_data["services"].append({"href": href, "type": self.services[service_name]["type"]})
-        self.node_data["clocks"] = list(self.clocks)
+        self.node_data["clocks"] = list(itervalues(self.clocks))
         self.node_data["version"] = str(ptptime.ptp_detail()[0]) + ":" + str(ptptime.ptp_detail()[1])
         try:
             self.aggregator.register("node", self.node_id, **self.preprocess_resource("node", self.node_data["id"],

@@ -120,7 +120,7 @@ class FacadeAPI(WebAPI):
 
         print(resp)
 
-        if resp.status_code / 100 != 2:
+        if resp.status_code // 100 != 2:
             abort(resp.status_code)
 
         data = {}
