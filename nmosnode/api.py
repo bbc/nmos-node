@@ -17,6 +17,7 @@ from __future__ import print_function
 from flask import request
 from nmoscommon.webapi import WebAPI, route, resource_route, abort
 from six.moves.urllib.parse import urljoin
+from six import itervalues
 import requests
 from socket import gethostname
 
@@ -65,7 +66,7 @@ class FacadeAPI(WebAPI):
             return self.registry.list_self(api_version=api_version)
         elif resource_type not in RESOURCE_TYPES:
             abort(404)
-        return list(self.registry.list_resource(resource_type.rstrip("s"), api_version=api_version))
+        return list(itervalues(self.registry.list_resource(resource_type.rstrip("s"), api_version=api_version)))
 
     @resource_route(NODE_APIROOT + "<api_version>/<resource_type>/<resource_id>/")
     def resource_id(self, api_version, resource_type, resource_id):
