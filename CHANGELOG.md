@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.10.6
+- Fix bug with python 3 list iterators
+
 ## 0.10.5
 - Fix bug with python 3 division and list iterators
 
