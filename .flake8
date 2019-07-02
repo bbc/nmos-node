@@ -5,5 +5,5 @@ exclude =
     .tox,
     dist,
     deb_dist,
-    __pycache__
+    __pycache__,
     tests

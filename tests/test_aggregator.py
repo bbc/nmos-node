@@ -333,7 +333,11 @@ class TestAggregator(unittest.TestCase):
 
         for o in objects:
             a.register_into("potato", o[0], o[1], **o[2])
-            a._reg_queue.put.assert_called_with({"method": "POST", "namespace": "potato", "res_type": o[0], "key": o[1]})
+            a._reg_queue.put.assert_called_with({
+                "method": "POST",
+                "namespace": "potato",
+                "res_type": o[0],
+                "key": o[1]})
             send_obj = {"type": o[0], "data": {k: v for (k, v) in iteritems(o[2])}}
             if 'id' not in send_obj['data']:
                 send_obj['data']['id'] = o[1]
@@ -352,7 +356,11 @@ class TestAggregator(unittest.TestCase):
 
         for o in objects:
             a.register(o[0], o[1], **o[2])
-            a._reg_queue.put.assert_called_with({"method": "POST", "namespace": "resource", "res_type": o[0], "key": o[1]})
+            a._reg_queue.put.assert_called_with({
+                "method": "POST",
+                "namespace": "resource",
+                "res_type": o[0],
+                "key": o[1]})
             send_obj = {"type": o[0], "data": {k: v for (k, v) in iteritems(o[2])}}
             if 'id' not in send_obj['data']:
                 send_obj['data']['id'] = o[1]
@@ -376,7 +384,11 @@ class TestAggregator(unittest.TestCase):
 
         for o in objects:
             a.unregister(o[0], o[1])
-            a._reg_queue.put.assert_called_with({"method": "DELETE", "namespace": "resource", "res_type": o[0], "key": o[1]})
+            a._reg_queue.put.assert_called_with({
+                "method": "DELETE",
+                "namespace": "resource",
+                "res_type": o[0],
+                "key": o[1]})
             if o[0] == "node":
                 self.assertIsNone(a._registered["node"])
             else:
@@ -1006,10 +1018,10 @@ class TestAggregator(unittest.TestCase):
         headers=None,
         to_point=SEND_ITERATION_0,
         initial_aggregator="",
-        aggregator_urls=["http://example0.com/aggregator/", "http://example1.com/aggregator/", "http://example2.com/aggregator/"], 
-        request=None, 
-        expected_return=None, 
-        expected_exception=None, 
+        aggregator_urls=["http://example0.com/aggregator/", "http://example1.com/aggregator/", "http://example2.com/aggregator/"],
+        request=None,
+        expected_return=None,
+        expected_exception=None,
         prefer_ipv6=False
     ):
         """This method checks that the SEND routine runs through its state machine as expected:
@@ -1053,23 +1065,74 @@ class TestAggregator(unittest.TestCase):
         expected_request_calls = []
         if to_point >= self.SEND_ITERATION_0:
             if not prefer_ipv6:
-                expected_request_calls.append(mock.call(method, urljoin(aggregator_urls[0], AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url), data=expected_data, headers=headers, timeout=1.0))
+                expected_request_calls.append(mock.call(
+                    method,
+                    urljoin(
+                        aggregator_urls[0],
+                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url
+                    ),
+                    data=expected_data,
+                    headers=headers,
+                    timeout=1.0))
             else:
-                expected_request_calls.append(mock.call(method, urljoin(aggregator_urls[0], AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url), data=expected_data, headers=headers, timeout=1.0, proxies={'http': ''}))
+                expected_request_calls.append(mock.call(
+                    method,
+                    urljoin(
+                        aggregator_urls[0],
+                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url
+                    ),
+                    data=expected_data,
+                    headers=headers,
+                    timeout=1.0,
+                    proxies={'http': ''}))
         if to_point > self.SEND_ITERATION_0:
             expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
         if to_point >= self.SEND_ITERATION_1:
             if not prefer_ipv6:
-                expected_request_calls.append(mock.call(method, urljoin(aggregator_urls[1], AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url), data=expected_data, headers=headers, timeout=1.0))
+                expected_request_calls.append(mock.call(
+                    method,
+                    urljoin(
+                        aggregator_urls[1],
+                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url
+                    ),
+                    data=expected_data,
+                    headers=headers,
+                    timeout=1.0))
             else:
-                expected_request_calls.append(mock.call(method, urljoin(aggregator_urls[1], AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url), data=expected_data, headers=headers, timeout=1.0, proxies={'http': ''}))
+                expected_request_calls.append(mock.call(
+                    method,
+                    urljoin(
+                        aggregator_urls[1],
+                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url
+                    ),
+                    data=expected_data,
+                    headers=headers, 
+                    timeout=1.0, 
+                    proxies={'http': ''}))
         if to_point > self.SEND_ITERATION_1:
             expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
         if to_point >= self.SEND_ITERATION_2:
             if not prefer_ipv6:
-                expected_request_calls.append(mock.call(method, urljoin(aggregator_urls[2], AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url), data=expected_data, headers=headers, timeout=1.0))
+                expected_request_calls.append(mock.call(
+                    method,
+                    urljoin(
+                        aggregator_urls[2],
+                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url
+                    ),
+                    data=expected_data,
+                    headers=headers,
+                    timeout=1.0))
             else:
-                expected_request_calls.append(mock.call(method, urljoin(aggregator_urls[2], AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url), data=expected_data, headers=headers, timeout=1.0, proxies={'http': ''}))
+                expected_request_calls.append(mock.call(
+                    method,
+                    urljoin(
+                        aggregator_urls[2],
+                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url
+                    ),
+                    data=expected_data,
+                    headers=headers,
+                    timeout=1.0,
+                    proxies={'http': ''}))
         if to_point > self.SEND_ITERATION_2:
             expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
 
@@ -1159,21 +1222,21 @@ class TestAggregator(unittest.TestCase):
         if it fails it will fail."""
         def request(*args, **kwargs):
             return None
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1, request=request, aggregator_urls=["http://example.com/aggregator/",])
+        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1, request=request, aggregator_urls=["http://example.com/aggregator/", ])
 
     def test_send_get_which_raises_with_only_one_aggregator_fails_at_second_checkpoint(self):
         """If the first attempt at sending throws an Exception then the SEND routine will try to get an alternative
         href, if it fails it will fail."""
         def request(*args, **kwargs):
             raise requests.exceptions.RequestException
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1, request=request, aggregator_urls=["http://example.com/aggregator/",])
+        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1, request=request, aggregator_urls=["http://example.com/aggregator/", ])
 
     def test_send_get_which_returns_500_with_only_one_aggregator_fails_at_second_checkpoint(self):
         """If the first attempt at sending returns a 500 error then the SEND routine will try to get an alternative
         href, if it fails it will fail."""
         def request(*args, **kwargs):
             return mock.MagicMock(status_code = 500)
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1, request=request, aggregator_urls=["http://example.com/aggregator/",])
+        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1, request=request, aggregator_urls=["http://example.com/aggregator/", ])
 
     def test_send_get_which_fails_then_returns_400_raises_exception(self):
         """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
@@ -1231,9 +1294,11 @@ class TestAggregator(unittest.TestCase):
 
     def test_send_get_which_fails_then_returns_200_and_json_returns_content(self):
         """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the second attempt returns a 200 with Content-Type as application/json then it will return the body sent back by the remote aggregator decoded as json"""
-        TEST_CONTENT = { "foo" : "bar",
-                             "baz" : [ "potato", "sundae" ] }
+        If the second attempt returns a 200 with Content-Type as application/json then it will return the body sent
+        back by the remote aggregator decoded as json"""
+        TEST_CONTENT = {
+            "foo": "bar",
+            "baz": ["potato", "sundae"]}
         class scoper:
             num_calls = 0
         def request(*args, **kwargs):
@@ -1241,7 +1306,7 @@ class TestAggregator(unittest.TestCase):
             if scoper.num_calls == 1:
                 return None
             else:
-                return mock.MagicMock(status_code = 200, headers={"content-type" : "application/json"}, json=mock.MagicMock(return_value=TEST_CONTENT))
+                return mock.MagicMock(status_code=200, headers={"content-type": "application/json"}, json=mock.MagicMock(return_value=TEST_CONTENT))
         self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_1, request=request, expected_return=TEST_CONTENT)
 
     def test_send_get_which_fails_with_only_two_aggregators_fails_at_third_checkpoint(self):
@@ -1263,7 +1328,7 @@ class TestAggregator(unittest.TestCase):
             if scoper.num_calls < 3:
                 return None
             else:
-                return mock.MagicMock(status_code = 400)
+                return mock.MagicMock(status_code=400)
         self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_2, request=request, expected_exception=InvalidRequest)
 
     def test_send_get_which_fails_twice_then_returns_204_returns_nothing(self):
@@ -1277,7 +1342,7 @@ class TestAggregator(unittest.TestCase):
             if scoper.num_calls < 3:
                 return None
             else:
-                return mock.MagicMock(status_code = 204)
+                return mock.MagicMock(status_code=204)
         self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_2, request=request, expected_return=None)
 
     def test_send_get_which_fails_twice_then_returns_200_returns_content(self):
@@ -1292,7 +1357,7 @@ class TestAggregator(unittest.TestCase):
             if scoper.num_calls < 3:
                 return None
             else:
-                return mock.MagicMock(status_code = 200, headers={}, content=TEST_CONTENT)
+                return mock.MagicMock(status_code=200, headers={}, content=TEST_CONTENT)
         self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_2, request=request, expected_return=TEST_CONTENT)
 
     def test_send_get_which_fails_twice_then_returns_201_returns_content(self):
@@ -1307,7 +1372,7 @@ class TestAggregator(unittest.TestCase):
             if scoper.num_calls < 3:
                 return None
             else:
-                return mock.MagicMock(status_code = 201, headers={}, content=TEST_CONTENT)
+                return mock.MagicMock(status_code=201, headers={}, content=TEST_CONTENT)
         self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_2, request=request, expected_return=TEST_CONTENT)
 
     def test_send_get_which_fails_twice_then_returns_200_and_json_returns_content(self):
@@ -1315,8 +1380,9 @@ class TestAggregator(unittest.TestCase):
         If the second attempt at sending times out then the SEND routine will try to get an alternative href.
         If the third attempt returns a 200 with Content-Type as application/json then it returns the body sent
         back decoded as json."""
-        TEST_CONTENT = { "foo" : "bar",
-                             "baz" : [ "potato", "sundae" ] }
+        TEST_CONTENT = {
+            "foo": "bar",
+            "baz": ["potato", "sundae"]}
         class scoper:
             num_calls = 0
         def request(*args, **kwargs):
@@ -1324,7 +1390,7 @@ class TestAggregator(unittest.TestCase):
             if scoper.num_calls < 3:
                 return None
             else:
-                return mock.MagicMock(status_code = 200, headers={"content-type" : "application/json"}, json=mock.MagicMock(return_value=TEST_CONTENT))
+                return mock.MagicMock(status_code=200, headers={"content-type": "application/json"}, json=mock.MagicMock(return_value=TEST_CONTENT))
         self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_2, request=request, expected_return=TEST_CONTENT)
 
     def test_send_get_which_fails_on_three_aggregators_raises(self):
