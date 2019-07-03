@@ -1,4 +1,4 @@
-# Copyright 2017 British Broadcasting Corporation
+# Copyright 2019 British Broadcasting Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -44,8 +44,8 @@ class TestAggregator(unittest.TestCase):
                  'gevent.spawn']
         patchers = {name: mock.patch(name) for name in paths}
         self.mocks = {name: patcher.start() for (name, patcher) in iteritems(patchers)}
-        for (name, patcher) in iteritems(patchers):
-            self.addCleanup(patcher.stop)
+
+        self.addCleanup(mock.patch.stopall)
 
         def printmsg(t):
             def _inner(msg):
@@ -76,9 +76,7 @@ class TestAggregator(unittest.TestCase):
         to that effect."""
         a = Aggregator()
 
-        objects = [
-            ("dummy", "testkey", {"test_param": "test_value", "test_param1": "test_value1"})
-            ]
+        objects = [("dummy", "testkey", {"test_param": "test_value", "test_param1": "test_value1"})]
 
         for o in objects:
             a.register_into("potato", o[0], o[1], **o[2])
@@ -277,7 +275,6 @@ class TestAggregator(unittest.TestCase):
 
     def test_process_queue_does_nothing_when_not_registered(self):
         """The queue processing thread should not SEND any messages when the node is not registered."""
-        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
         a = Aggregator(mdns_updater=mock.MagicMock())
         a._registered["registered"] = False
         a._reg_queue.empty.return_value = True
@@ -561,10 +558,6 @@ class TestAggregator(unittest.TestCase):
 
     def test_process_queue_handles_exception_in_unqueueing(self):
         """An exception in unqueing an item should reset the object state to unregistered."""
-        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
-        DUMMYKEY = "dummykey"
-        DUMMYPARAMKEY = "dummyparamkey"
-        DUMMYPARAMVAL = "dummyparamval"
 
         a = Aggregator(mdns_updater=mock.MagicMock())
         a._registered["registered"] = True
@@ -767,7 +760,10 @@ class TestAggregator(unittest.TestCase):
         headers=None,
         to_point=SEND_ITERATION_0,
         initial_aggregator="",
-        aggregator_urls=["http://example0.com/aggregator/", "http://example1.com/aggregator/", "http://example2.com/aggregator/"],
+        aggregator_urls=[
+            "http://example0.com/aggregator/", 
+            "http://example1.com/aggregator/", 
+            "http://example2.com/aggregator/"],
         request=None,
         expected_return=None,
         expected_exception=None,
@@ -785,7 +781,7 @@ class TestAggregator(unittest.TestCase):
             SEND_ITERATION_2              = Attempt a SEND
             SEND_TOO_MANY_RETRIES         = Raise an exception due to too many failures.
 
-        If any of the SEND attempts succeeds then the routine exits immediately succesfully."""
+        If any of the SEND attempts succeeds then the routine exits immediately successfully."""
 
         aggregator_urls_queue = [x for x in aggregator_urls]
 
