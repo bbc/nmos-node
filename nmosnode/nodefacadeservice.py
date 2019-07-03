@@ -266,7 +266,6 @@ class NodeFacadeService:
             self.registry.update_ptp()
             time.sleep(1)
         os.unlink(pidfile)
-        self._cleanup()
 
     def _cleanup(self):
         try:
@@ -290,6 +289,7 @@ class NodeFacadeService:
 
     def stop(self):
         self.running = False
+        self._cleanup()
 
 
 if __name__ == '__main__':
