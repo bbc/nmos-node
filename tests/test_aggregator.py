@@ -72,30 +72,32 @@ class TestAggregator(unittest.TestCase):
         self.assertEqual(a.queue_thread.thread_function, a._process_queue)
 
     def test_register_into(self):
-        """register_into should register an object into a namespace, adding a scheduled call to the registration queue
-        to that effect."""
+        """register_into() should register an object into a namespace, adding a scheduled call to the registration
+        queue to that effect."""
         a = Aggregator()
 
+        namespace = "potato"
         objects = [("dummy", "testkey", {"test_param": "test_value", "test_param1": "test_value1"})]
 
         for o in objects:
-            a.register_into("potato", o[0], o[1], **o[2])
+            a.register_into(namespace, o[0], o[1], **o[2])
             a._reg_queue.put.assert_called_with({
                 "method": "POST",
-                "namespace": "potato",
+                "namespace": namespace,
                 "res_type": o[0],
                 "key": o[1]})
             send_obj = {"type": o[0], "data": {k: v for (k, v) in iteritems(o[2])}}
             if 'id' not in send_obj['data']:
                 send_obj['data']['id'] = o[1]
-            self.assertEqual(a._registered["entities"]["potato"][o[0]][o[1]], send_obj)
+            self.assertEqual(a._registered["entities"][namespace][o[0]][o[1]], send_obj)
 
     def test_register(self):
-        """register should register an object into namespace "resource", adding a scheduled call to the registration
+        """register() should register an object into namespace "resource", adding a scheduled call to the registration
         queue to that effect. There is special behaviour when registering a node, since the object can only ever have
         one node registration at a time."""
         a = Aggregator()
 
+        namespace = "resource"
         objects = [
             ("dummy", "testkey", {"test_param": "test_value", "test_param1": "test_value1"}),
             ("node", "testnode", {"test_param": "test_value", "test_param1": "test_value1"})
@@ -105,7 +107,7 @@ class TestAggregator(unittest.TestCase):
             a.register(o[0], o[1], **o[2])
             a._reg_queue.put.assert_called_with({
                 "method": "POST",
-                "namespace": "resource",
+                "namespace": namespace,
                 "res_type": o[0],
                 "key": o[1]})
             send_obj = {"type": o[0], "data": {k: v for (k, v) in iteritems(o[2])}}
@@ -114,13 +116,14 @@ class TestAggregator(unittest.TestCase):
             if o[0] == "node":
                 self.assertEqual(a._registered["node"], send_obj)
             else:
-                self.assertEqual(a._registered["entities"]["resource"][o[0]][o[1]], send_obj)
+                self.assertEqual(a._registered["entities"][namespace][o[0]][o[1]], send_obj)
 
     def test_unregister(self):
-        """unregister should schedule a call to unregister the specified devices.
+        """unregister() should schedule a call to unregister the specified devices.
         Special behaviour is expected when unregistering a node."""
         a = Aggregator()
 
+        namespace = "resource"
         objects = [
             ("dummy", "testkey", {"test_param": "test_value", "test_param1": "test_value1"}),
             ("node", "testnode", {"test_param": "test_value", "test_param1": "test_value1"})
@@ -129,17 +132,16 @@ class TestAggregator(unittest.TestCase):
         for o in objects:
             a.register(o[0], o[1], **o[2])
 
-        for o in objects:
             a.unregister(o[0], o[1])
             a._reg_queue.put.assert_called_with({
                 "method": "DELETE",
-                "namespace": "resource",
+                "namespace": namespace,
                 "res_type": o[0],
                 "key": o[1]})
             if o[0] == "node":
                 self.assertIsNone(a._registered["node"])
             else:
-                self.assertNotIn(o[1], a._registered["entities"]["resource"][o[0]])
+                self.assertNotIn(o[1], a._registered["entities"][namespace][o[0]])
 
     def test_stop(self):
         """A call to stop should set _running to false and then join the heartbeat thread."""
@@ -347,7 +349,7 @@ class TestAggregator(unittest.TestCase):
         def killloop(*args, **kwargs):
             a._running = False
 
-        with mock.patch('gevent.sleep', side_effect=killloop) as sleep:
+        with mock.patch('gevent.sleep', side_effect=killloop):
             with mock.patch.object(a, '_SEND') as SEND:
                 a._process_queue()
 
@@ -761,8 +763,8 @@ class TestAggregator(unittest.TestCase):
         to_point=SEND_ITERATION_0,
         initial_aggregator="",
         aggregator_urls=[
-            "http://example0.com/aggregator/", 
-            "http://example1.com/aggregator/", 
+            "http://example0.com/aggregator/",
+            "http://example1.com/aggregator/",
             "http://example2.com/aggregator/"],
         request=None,
         expected_return=None,
