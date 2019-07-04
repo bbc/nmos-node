@@ -169,6 +169,7 @@ class TestAggregator(unittest.TestCase):
             with mock.patch.object(a, '_process_reregister') as procreg:
                 with mock.patch.object(a, '_SEND') as SEND:
                     a._heartbeat()
+
                     procreg.assert_called_with()
                     SEND.assert_not_called()
                     a._mdns_updater.inc_P2P_enable_count.assert_not_called()
@@ -187,6 +188,7 @@ class TestAggregator(unittest.TestCase):
             with mock.patch.object(a, '_process_reregister') as procreg:
                 with mock.patch.object(a, '_SEND') as SEND:
                     a._heartbeat()
+
                     procreg.assert_not_called()
                     SEND.assert_not_called()
                     a._mdns_updater.inc_P2P_enable_count.assert_called_with()
@@ -279,7 +281,7 @@ class TestAggregator(unittest.TestCase):
         """The queue processing thread should not SEND any messages when the node is not registered."""
         a = Aggregator(mdns_updater=mock.MagicMock())
         a._registered["registered"] = False
-        a._reg_queue.empty.return_value = True
+        a._reg_queue.empty.return_value = False
 
         def killloop(*args, **kwargs):
             a._running = False
