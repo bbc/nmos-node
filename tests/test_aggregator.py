@@ -23,6 +23,7 @@ import mock
 import gevent
 import json
 import requests
+import traceback
 from nmosnode.aggregator import Aggregator, InvalidRequest, REGISTRATION_MDNSTYPE, AGGREGATOR_APIVERSION
 from nmosnode.aggregator import NoAggregator, AGGREGATOR_APINAMESPACE, LEGACY_REG_MDNSTYPE, AGGREGATOR_APINAME
 from nmosnode.aggregator import TooManyRetries
@@ -398,7 +399,7 @@ class TestAggregator(unittest.TestCase):
             with mock.patch.object(a, '_SEND') as SEND:
                 try:
                     a._process_queue()
-                except:
+                except Exception:
                     self.fail(msg="process_queue kept running")
 
                 SEND.assert_has_calls(expected_calls)
@@ -438,7 +439,7 @@ class TestAggregator(unittest.TestCase):
         def killloop(*args, **kwargs):
             a._running = False
 
-        with mock.patch('gevent.sleep', side_effect=killloop) as sleep:
+        with mock.patch('gevent.sleep', side_effect=killloop):
             with mock.patch.object(a, '_SEND', side_effect=Exception) as SEND:
                 a._process_queue()
 
@@ -478,7 +479,7 @@ class TestAggregator(unittest.TestCase):
         def killloop(*args, **kwargs):
             a._running = False
 
-        with mock.patch('gevent.sleep', side_effect=killloop) as sleep:
+        with mock.patch('gevent.sleep', side_effect=killloop):
             with mock.patch.object(a, '_SEND', side_effect=InvalidRequest) as SEND:
                 a._process_queue()
 
@@ -518,7 +519,7 @@ class TestAggregator(unittest.TestCase):
         def killloop(*args, **kwargs):
             a._running = False
 
-        with mock.patch('gevent.sleep', side_effect=killloop) as sleep:
+        with mock.patch('gevent.sleep', side_effect=killloop):
             with mock.patch.object(a, '_SEND', side_effect=InvalidRequest) as SEND:
                 a._process_queue()
 
@@ -553,7 +554,7 @@ class TestAggregator(unittest.TestCase):
         def killloop(*args, **kwargs):
             a._running = False
 
-        with mock.patch('gevent.sleep', side_effect=killloop) as sleep:
+        with mock.patch('gevent.sleep', side_effect=killloop):
             with mock.patch.object(a, '_SEND', side_effect=InvalidRequest) as SEND:
                 a._process_queue()
 
@@ -572,7 +573,7 @@ class TestAggregator(unittest.TestCase):
         def killloop(*args, **kwargs):
             a._running = False
 
-        with mock.patch('gevent.sleep', side_effect=killloop) as sleep:
+        with mock.patch('gevent.sleep', side_effect=killloop):
             with mock.patch.object(a, '_SEND') as SEND:
                 a._process_queue()
 
@@ -580,8 +581,9 @@ class TestAggregator(unittest.TestCase):
                 a._mdns_updater.P2P_disable.assert_called_with()
                 self.assertFalse(a._registered["registered"])
 
-
+    # ===================================================================================
     # In order to test the _process_reregister method we define some extra infrastructure
+    # ===================================================================================
 
     # These are the steps that the method passes through before completing, it is possible for it to fail early
     REREGISTER_START       = 0
@@ -747,8 +749,11 @@ class TestAggregator(unittest.TestCase):
                 return
         self.assert_reregister_runs_correctly(_send=_send, to_point=self.REREGISTER_NODE)
 
+    # ===================================================================================
+    # In order to test the _SEND method we define some extra infrastructure
+    # ===================================================================================
 
-    #testing the _SEND method is similarly complex
+    # These are the steps that the method passes through before completing, it is possible for it to fail early
     SEND_START                    = 0
     SEND_AGGREGATOR_EMPTY_CHECK_0 = 1
     SEND_ITERATION_0              = 2
