@@ -107,7 +107,7 @@ class TestMDNSUpdater(unittest.TestCase):
 
     def test_P2P_disable_when_enabled(self):
         """When an MDNSUpdater is already enabled for P2P calling P2P_disable should disable P2P"""
-       
+
         self.UUT.P2P_enable()
         counter = 0
         while not self.UUT._mdns_update_queue.empty() and counter < MAX_ITERATIONS:
