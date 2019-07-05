@@ -952,7 +952,7 @@ class TestAggregator(unittest.TestCase):
         TEST_CONTENT = "kasjhdlkhnjgsnhjhgwhudjdndjhnrhg;kduhjhnf"
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=200, headers={}, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_0, request=request, expected_return=TEST_CONTENT, prefer_ipv6 = True)
+        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_0, request=request, expected_return=TEST_CONTENT, prefer_ipv6=True)
 
     def test_send_get_which_returns_201_returns_content(self):
         """If the first attempt at sending gives a 201 success then the SEND method will return normally with a body."""
