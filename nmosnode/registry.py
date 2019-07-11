@@ -51,11 +51,11 @@ RES_OTHERERROR = 5
 HTTPS_MODE = _config.get('https_mode', 'disabled')
 
 
-class FacadeRegistryCleaner(threading.Thread):
+class NodeRegistryCleaner(threading.Thread):
     def __init__(self, registry):
         self.stopping = False
         self.registry = registry
-        super(FacadeRegistryCleaner, self).__init__()
+        super(NodeRegistryCleaner, self).__init__()
         self.daemon = True
 
     def run(self):
@@ -79,11 +79,13 @@ def api_version_less_than(a, b):
 
 
 def legalise_resource(res, rtype, api_version):
-    RESOURCE_CORE_V1_1 = ["id",
-                          "version",
-                          "label",
-                          "description",
-                          "tags"]
+    RESOURCE_CORE_V1_1 = [
+        "id",
+        "version",
+        "label",
+        "description",
+        "tags"
+    ]
     # v1.0 begins
     legalkeys = {
         ("node", "v1.0"): [
@@ -153,28 +155,40 @@ def legalise_resource(res, rtype, api_version):
     # v1.0 ends
 
     # v1.1 begins
-    legalkeys[("node", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                   legalkeys[("node", "v1.0")] +
-                                   ["api", "clocks"])
-    legalkeys[("device", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                     legalkeys[("device", "v1.0")] +
-                                     ["controls"])
-    legalkeys[("source", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                     legalkeys[("source", "v1.0")] +
-                                     ["clock_name", "grain_rate"] +
-                                     ["channels"])
-    legalkeys[("flow", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                   legalkeys[("flow", "v1.0")] +
-                                   ["device_id", "grain_rate", "media_type"] +
-                                   ["sample_rate", "bit_depth"] +
-                                   ["DID_SDID"] +
-                                   ["frame_width", "frame_height",
-                                    "interlace_mode", "colorspace",
-                                    "components", "transfer_characteristic"])
-    legalkeys[("sender", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                     legalkeys[("sender", "v1.0")])
-    legalkeys[("receiver", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                       legalkeys[("receiver", "v1.0")])
+    legalkeys[("node", "v1.1")] = (
+        RESOURCE_CORE_V1_1 + legalkeys[("node", "v1.0")] + ["api", "clocks"]
+    )
+
+    legalkeys[("device", "v1.1")] = (
+        RESOURCE_CORE_V1_1 + legalkeys[("device", "v1.0")] + ["controls"]
+    )
+
+    legalkeys[("source", "v1.1")] = (
+        RESOURCE_CORE_V1_1 + legalkeys[("source", "v1.0")] + ["clock_name", "grain_rate"] + ["channels"]
+    )
+
+    legalkeys[("flow", "v1.1")] = (
+        RESOURCE_CORE_V1_1 +
+        legalkeys[("flow", "v1.0")] +
+        ["device_id", "grain_rate", "media_type"] +
+        ["sample_rate", "bit_depth"] +
+        ["DID_SDID"] +
+        [
+            "frame_width",
+            "frame_height",
+            "interlace_mode",
+            "colorspace",
+            "components",
+            "transfer_characteristic"
+        ]
+    )
+    legalkeys[("sender", "v1.1")] = (
+        RESOURCE_CORE_V1_1 + legalkeys[("sender", "v1.0")]
+    )
+
+    legalkeys[("receiver", "v1.1")] = (
+        RESOURCE_CORE_V1_1 + legalkeys[("receiver", "v1.0")]
+    )
     # v1.1 ends
 
     # v1.2 begins
@@ -210,7 +224,7 @@ def legalise_resource(res, rtype, api_version):
     return retval
 
 
-class FacadeRegistry(object):
+class NodeRegistry(object):
     def __init__(self, resources, aggregator, mdns_updater, node_id, node_data, logger=None):
         # `node_data` must be correctly structured
         self.permitted_resources = resources
@@ -314,7 +328,14 @@ class FacadeRegistry(object):
     def register_resource(self, service_name, pid, type, key, value):
         if type not in self.permitted_resources:
             return RES_UNSUPPORTED
-        return self._register(service_name, "resource", pid, type, key, value)
+        return self._register(
+            service_name=service_name,
+            namespace="resource",
+            pid=pid,
+            type=type,
+            key=key,
+            value=value
+        )
 
     def register_control(self, service_name, pid, device_id, control_data):
         return self._register(
@@ -579,7 +600,7 @@ class FacadeRegistry(object):
 
 if __name__ == "__main__":
     import uuid
-    registry = FacadeRegistry()
+    registry = NodeRegistry()
     print("Registering service and flow")
     registry.register_service("pipelinemanager", 100, "http://127.0.0.1:12345")
     test_key = str(uuid.uuid4())

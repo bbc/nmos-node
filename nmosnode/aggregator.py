@@ -15,22 +15,19 @@
 import gevent
 from gevent import monkey
 monkey.patch_all()
+import gevent.queue # noqa E402
 
 from six import itervalues # noqa E402
 from six.moves.urllib.parse import urljoin # noqa E402
-
 import requests # noqa E402
 import json # noqa E402
 import time # noqa E402
-
-import gevent.queue # noqa E402
+import traceback # noqa E402
 
 from nmoscommon.logger import Logger # noqa E402
-from mdnsbridge.mdnsbridgeclient import IppmDNSBridge # noqa E402
-from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException # noqa E402
-
 from nmoscommon.nmoscommonconfig import config as _config # noqa E402
-import traceback # noqa E402
+from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException # noqa E402
+from mdnsbridge.mdnsbridgeclient import IppmDNSBridge # noqa E402
 
 AGGREGATOR_APIVERSION = _config.get('nodefacade').get('NODE_REGVERSION')
 AGGREGATOR_APINAMESPACE = "x-nmos"
@@ -62,7 +59,7 @@ class TooManyRetries(Exception):
         super(TooManyRetries, self).__init__("Too many retries.")
 
 
-class Aggregator(object):
+class NodeAggregator(object):
     """This class serves as a proxy for the distant aggregation service running elsewhere on the network.
     It will search out aggregators and locate them, falling back to other ones if the one it is connected to
     disappears, and resending data as needed."""
@@ -467,7 +464,7 @@ class MDNSUpdater(object):
 if __name__ == "__main__":  # pragma: no cover
     from uuid import uuid4
 
-    agg = Aggregator()
+    agg = NodeAggregator()
     ID = str(uuid4())
 
     agg.register("node", ID, id=ID, label="A Test Service", href="http://127.0.0.1:12345/", services=[], caps={},

@@ -18,17 +18,17 @@ from nmoscommon.logger import Logger
 ADDRESS = "ipc:///tmp/ips-nodefacade"
 
 
+# Tags each decorated function with a boolean attribute 'ipc_method' upon instantiation
 def ipcmethod(name=None):
     def decorator(function):
         function.ipc_method = True
-        function.ipc_name = name
         return function
     if callable(name):
         return decorator(name)
-    return decorator
+    return name
 
 
-class FacadeInterface(object):
+class NodeInterface(object):
     def __init__(self, registry, logger):
         self.host = Host(ADDRESS)
         self.registry = registry
@@ -54,38 +54,38 @@ class FacadeInterface(object):
         self.host.stop()
 
     @ipcmethod
-    def srv_register(self, name, srv_type, pid, href, proxy_path, authorization=False):
+    def service_register(self, name, srv_type, pid, href, proxy_path, authorization=False):
         self.logger.writeInfo("Service Register {}, {}, {}, {}, {}".format(name, srv_type, pid, href, proxy_path))
         return self.registry.register_service(name, srv_type, pid, href, proxy_path, authorization)
 
     # TODO: =None should be removed once proxying removed from node facade
     @ipcmethod
-    def srv_update(self, name, pid, href, proxy_path):
+    def service_update(self, name, pid, href, proxy_path):
         self.logger.writeInfo("Service Update {}, {}, {}, {}".format(name, pid, href, proxy_path))
         return self.registry.update_service(name, pid, href, proxy_path)
 
     @ipcmethod
-    def srv_unregister(self, name, pid):
+    def service_unregister(self, name, pid):
         self.logger.writeInfo("Service Unregister {}, {}".format(name, pid))
         return self.registry.unregister_service(name, pid)
 
     @ipcmethod
-    def srv_heartbeat(self, name, pid):
+    def service_heartbeat(self, name, pid):
         self.logger.writeDebug("Service Heartbeat {}, {}".format(name, pid))
         return self.registry.heartbeat_service(name, pid)
 
     @ipcmethod
-    def res_register(self, name, pid, type, key, value):
+    def resource_register(self, name, pid, type, key, value):
         self.logger.writeInfo("Resource Register {} {} {} {} {}".format(name, pid, type, key, value))
         return self.registry.register_resource(name, pid, type, key, value)
 
     @ipcmethod
-    def res_update(self, name, pid, type, key, value):
+    def resource_update(self, name, pid, type, key, value):
         self.logger.writeInfo("Resource Update {} {} {} {} {}".format(name, pid, type, key, value))
         return self.registry.update_resource(name, pid, type, key, value)
 
     @ipcmethod
-    def res_unregister(self, name, pid, type, key):
+    def resource_unregister(self, name, pid, type, key):
         self.logger.writeInfo("Resource Unregister {} {} {} {}".format(name, pid, type, key))
         return self.registry.unregister_resource(name, pid, type, key)
 

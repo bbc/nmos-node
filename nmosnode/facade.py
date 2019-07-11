@@ -14,12 +14,14 @@
 
 from __future__ import absolute_import
 from __future__ import print_function
+
 import gevent
 import os
-from nmoscommon.ipc import Proxy
 from threading import Lock
-from nmoscommon.logger import Logger
 from copy import deepcopy
+
+from nmoscommon.ipc import Proxy
+from nmoscommon.logger import Logger
 
 FAC_SUCCESS = 0
 FAC_EXISTS = 1
@@ -29,18 +31,18 @@ FAC_UNSUPPORTED = 4
 FAC_OTHERERROR = 5
 
 
-class Facade(object):
-    """This class serves as a proxy for the Facade running on the same machine if it exists. If no facade exists
+class NodeFacade(object):
+    """This class serves as a proxy for the Node Interface running on the same machine if it exists. If no facade exists
     on this machine then it will do nothing, but calls will still function without throwing any exceptions."""
-    def __init__(self, srv_type, address="ipc:///tmp/ips-nodefacade", logger=None):
+    def __init__(self, service_type, address="ipc:///tmp/ips-nodefacade", logger=None):
 
         self.logger = Logger("facade_proxy", logger)
         self.ipc = None
-        self.srv_registered = False  # Flag whether service is registered
+        self.service_registered = False  # Flag whether service is registered
         self.reregister = False  # Flag whether resources are correctly registered
         self.address = address
-        self.srv_type = srv_type.lower()
-        self.srv_type_urn = "urn:x-ipstudio:service:" + self.srv_type
+        self.service_type = service_type.lower()
+        self.service_type_urn = "urn:x-ipstudio:service:" + self.service_type
         self.pid = os.getpid()
         self.resources = {}
         self.controls = {}
@@ -65,9 +67,11 @@ class Facade(object):
             return
         try:
             with self.lock:
-                s = self.ipc.srv_register(self.srv_type, self.srv_type_urn, self.pid, href, proxy_path, authorization)
+                s = self.ipc.service_register(
+                    self.service_type, self.service_type_urn, self.pid, href, proxy_path, authorization
+                )
                 if s == FAC_SUCCESS:
-                    self.srv_registered = True
+                    self.service_registered = True
                 else:
                     self.logger.writeInfo("Service registration failed: {}".format(self.debug_message(s)))
         except Exception as e:
@@ -81,8 +85,8 @@ class Facade(object):
             return
         try:
             with self.lock:
-                self.ipc.srv_unregister(self.srv_type, self.pid)
-                self.srv_registered = False
+                self.ipc.service_unregister(self.srv_type, self.pid)
+                self.service_registered = False
         except Exception as e:
             self.logger.writeError("Exception when unregistering service: {}".format(str(e)))
             self.ipc = None
@@ -94,13 +98,13 @@ class Facade(object):
             return
         try:
             with self.lock:
-                s = self.ipc.srv_heartbeat(self.srv_type, self.pid)
+                s = self.ipc.service_heartbeat(self.service_type, self.pid)
                 if s != FAC_SUCCESS:
-                    self.srv_registered = False
+                    self.service_registered = False
                     self.logger.writeInfo("Heartbeat failed: {}".format(self.debug_message(s)))
                 else:
-                    self.srv_registered = True
-            if not self.srv_registered or self.reregister:
+                    self.service_registered = True
+            if not self.service_registered or self.reregister:
                 # Handle reconnection if facade disappears
                 self.logger.writeInfo("Reregistering all services")
                 self.reregister_all()
@@ -112,10 +116,10 @@ class Facade(object):
     # To cause a re-registration on failure, set self.reregister!
     def reregister_all(self):
         self.unregister_service()
-        if self.srv_registered:
+        if self.service_registered:
             return
         self.register_service(self.href, self.proxy_path)
-        if not self.srv_registered:
+        if not self.service_registered:
             return
 
         # TODO(clyntp): the following blocks are so similar...
@@ -133,7 +137,7 @@ class Facade(object):
                                 resource.pop('pipel_id')
                             if "pipeline_id" in self.resources[type][key]:
                                 resource.pop('pipeline_id')
-                        self.ipc.res_register(self.srv_type, self.pid, type, key, resource)
+                        self.ipc.resource_register(self.service_type, self.pid, type, key, resource)
                 except Exception as e:
                     self.logger.writeError("Exception when re-registering resource: {}".format(str(e)))
                     self.ipc = None
@@ -146,7 +150,7 @@ class Facade(object):
                 control_data = self.controls[device_id][control_href]
                 try:
                     with self.lock:
-                        self.ipc.control_register(self.srv_type, self.pid, device_id, control_data)
+                        self.ipc.control_register(self.service_type, self.pid, device_id, control_data)
                 except Exception as e:
                     self.logger.writeError("Exception when re-registering control: {}".format(str(e)))
                     self.ipc = None
@@ -156,7 +160,7 @@ class Facade(object):
         self.reregister = False
 
     def _call_ipc_method(self, method, *args, **kwargs):
-        if not self.srv_registered:
+        if not self.service_registered:
             # Don't attempt if not registered - will just hit many timeouts
             self.reregister = True
             return
@@ -167,7 +171,7 @@ class Facade(object):
             return
         try:
             with self.lock:
-                return self.ipc.invoke_named(method, self.srv_type, self.pid, *args, **kwargs)
+                return self.ipc.invoke_named(method, self.service_type, self.pid, *args, **kwargs)
         except Exception as e:
             self.logger.writeError("Exception when calling IPC method: {}".format(str(e)))
             self.ipc = None
@@ -178,14 +182,14 @@ class Facade(object):
         if type not in self.resources:
             self.resources[type] = {}
         self.resources[type][key] = value
-        self._call_ipc_method("res_register", type, key, value)
+        self._call_ipc_method("resource_register", type, key, value)
 
     def updateResource(self, type, key, value):
         value = deepcopy(value)
         if type not in self.resources:
             self.resources[type] = {}
         self.resources[type][key] = value
-        self._call_ipc_method("res_update", type, key, value)
+        self._call_ipc_method("resource_update", type, key, value)
 
     def delResource(self, type, key):
         if type in self.resources:
@@ -196,7 +200,7 @@ class Facade(object):
                         del self.resources["transport"][transport]
             if key in self.resources[type]:
                 del self.resources[type][key]
-        self._call_ipc_method("res_unregister", type, key)
+        self._call_ipc_method("resource_unregister", type, key)
 
     def addControl(self, device_id, control_data):
         if device_id not in self.controls:

@@ -24,35 +24,28 @@ import os  # noqa E402
 import sys # noqa E402
 import json # noqa E402
 from six import itervalues # noqa E402
-
-from nmoscommon.httpserver import HttpServer # noqa E402
-from nmoscommon.utils import get_node_id # noqa E402
-from socket import gethostname, getfqdn # noqa E402
-from .api import FacadeAPI # noqa E402
-from .registry import FacadeRegistry, FacadeRegistryCleaner, legalise_resource # noqa E402
-from .serviceinterface import FacadeInterface # noqa E402
-from os import getpid # noqa E402
 from subprocess import check_output # noqa E402
-# Handle if systemd is installed instead of newer cysystemd
-# noqa E402
-try:
-    from cysystemd import daemon
-    SYSTEMD_READY = daemon.Notification.READY
-except ImportError:
-    from systemd import daemon
-    SYSTEMD_READY = "READY=1"
+from socket import gethostname, getfqdn, AF_INET6 # noqa E402
 
-from .api import NODE_APIVERSIONS # noqa E402
-from .api import NODE_REGVERSION # noqa E402
-from .aggregator import Aggregator # noqa E402
-from .aggregator import MDNSUpdater # noqa E402
-
-from nmoscommon.utils import getLocalIP # noqa E402
+from nmoscommon import ptptime # noqa E402
+from nmoscommon.httpserver import HttpServer # noqa E402
+from nmoscommon.utils import get_node_id, getLocalIP # noqa E402
 from nmoscommon.mdns import MDNSEngine # noqa E402
 from nmoscommon.logger import Logger # noqa E402
-from nmoscommon import ptptime # noqa E402
 from nmoscommon.nmoscommonconfig import config as _config # noqa E402
-import socket # noqa E402
+
+from .api import NodeAPI, NODE_APIVERSIONS, NODE_REGVERSION  # noqa E402
+from .registry import NodeRegistry, NodeRegistryCleaner, legalise_resource # noqa E402
+from .serviceinterface import NodeInterface # noqa E402
+from .aggregator import NodeAggregator, MDNSUpdater # noqa E402
+
+# Handle if systemd is installed instead of newer cysystemd
+try:
+    from cysystemd import daemon # noqa E402
+    SYSTEMD_READY = daemon.Notification.READY
+except ImportError:
+    from systemd import daemon # noqa E402
+    SYSTEMD_READY = "READY=1"
 
 NS = 'urn:x-bbcrd:ips:ns:0.1'
 PORT = 12345
@@ -76,13 +69,13 @@ def updateHost():
     elif _config.get('prefer_ipv6', False) is False:
         return getLocalIP()
     else:
-        return "[" + getLocalIP(None, socket.AF_INET6) + "]"
+        return "[" + getLocalIP(None, AF_INET6) + "]"
 
 
 HOST = updateHost()
 DNS_SD_HTTP_PORT = 80
 DNS_SD_HTTPS_PORT = 443
-DNS_SD_NAME = 'node_' + str(HOSTNAME) + "_" + str(getpid())
+DNS_SD_NAME = 'node_' + str(HOSTNAME) + "_" + str(os.getpid())
 DNS_SD_TYPE = '_nmos-node._tcp'
 
 
@@ -129,7 +122,7 @@ class NodeFacadeService:
                 self.logger,
                 txt_recs=self._mdns_txt(NODE_APIVERSIONS, "http", OAUTH_MODE)
             )
-        self.aggregator = Aggregator(self.logger, self.mdns_updater)
+        self.aggregator = NodeAggregator(self.logger, self.mdns_updater)
 
     def _mdns_txt(self, versions, protocol, oauth_mode):
         return {
@@ -146,10 +139,12 @@ class NodeFacadeService:
         if getLocalIP() != "":
             global HOST
             HOST = updateHost()
-            self.registry.modify_node(href=self.generate_href(),
-                                      host=HOST,
-                                      api={"versions": NODE_APIVERSIONS, "endpoints": self.generate_endpoints()},
-                                      interfaces=self.list_interfaces())
+            self.registry.modify_node(
+                href=self.generate_href(),
+                host=HOST,
+                api={"versions": NODE_APIVERSIONS, "endpoints": self.generate_endpoints()},
+                interfaces=self.list_interfaces()
+            )
 
     def generate_endpoints(self):
         endpoints = []
@@ -243,15 +238,17 @@ class NodeFacadeService:
             "clocks": [],
             "interfaces": self.list_interfaces()
         }
-        self.registry = FacadeRegistry(self.mappings.keys(),
-                                       self.aggregator,
-                                       self.mdns_updater,
-                                       self.node_id,
-                                       node_data,
-                                       self.logger)
-        self.registry_cleaner = FacadeRegistryCleaner(self.registry)
+        self.registry = NodeRegistry(
+            self.mappings.keys(),
+            self.aggregator,
+            self.mdns_updater,
+            self.node_id,
+            node_data,
+            self.logger
+        )
+        self.registry_cleaner = NodeRegistryCleaner(self.registry)
         self.registry_cleaner.start()
-        self.httpServer = HttpServer(FacadeAPI, PORT, '0.0.0.0', api_args=[self.registry])
+        self.httpServer = HttpServer(NodeAPI, PORT, '0.0.0.0', api_args=[self.registry])
         self.httpServer.start()
         while not self.httpServer.started.is_set():
             self.logger.writeInfo('Waiting for httpserver to start...')
@@ -268,14 +265,14 @@ class NodeFacadeService:
         except Exception as e:
             self.logger.writeWarning("Could not register: {}".format(e.__repr__()))
 
-        self.interface = FacadeInterface(self.registry, self.logger)
+        self.interface = NodeInterface(self.registry, self.logger)
         self.interface.start()
 
     def run(self):
         self.running = True
         pidfile = "/tmp/ips-nodefacade.pid"
         with open(pidfile, 'w') as f:
-            f.write(str(getpid()))
+            f.write(str(os.getpid()))
         self.start()
         daemon.notify(SYSTEMD_READY)
         while self.running:

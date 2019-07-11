@@ -14,13 +14,13 @@
 
 from __future__ import print_function
 
+import requests
 from flask import request
-from nmoscommon.webapi import WebAPI, route, resource_route, abort
 from six.moves.urllib.parse import urljoin
 from six import itervalues
-import requests
 from socket import gethostname
 
+from nmoscommon.webapi import WebAPI, route, resource_route, abort
 from nmoscommon.nmoscommonconfig import config as _config
 
 NODE_APIVERSIONS = ["v1.0", "v1.1", "v1.2", "v1.3"]
@@ -34,11 +34,11 @@ HOSTNAME = gethostname().split(".", 1)[0]
 RESOURCE_TYPES = ["sources", "flows", "devices", "senders", "receivers"]
 
 
-class FacadeAPI(WebAPI):
+class NodeAPI(WebAPI):
     def __init__(self, registry):
         self.registry = registry
         self.node_id = registry.node_id
-        super(FacadeAPI, self).__init__()
+        super(NodeAPI, self).__init__()
 
     @route('/')
     def root(self):
