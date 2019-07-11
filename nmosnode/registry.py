@@ -14,19 +14,19 @@
 
 from __future__ import print_function, absolute_import
 
+import json
 import time
 import threading
 import copy
-
 from six.moves.urllib.parse import urlparse, urlunparse
 from six import itervalues
+
 from nmoscommon.logger import Logger
 from nmoscommon import ptptime
 from nmoscommon.mdns.mdnsExceptions import ServiceAlreadyExistsException
-from .api import NODE_REGVERSION
-import json
-
 from nmoscommon.nmoscommonconfig import config as _config
+
+from .api import NODE_REGVERSION
 
 try:
     # Use internal BBC RD ipputils to get PTP if available
@@ -236,7 +236,11 @@ class FacadeRegistry(object):
             if self.services[service_name]["href"]:
                 if self.services[service_name]["proxy_path"]:
                     href = self.node_data["href"] + self.services[service_name]["proxy_path"]
-            self.node_data["services"].append({"href": href, "type": self.services[service_name]["type"]})
+            self.node_data["services"].append({
+                "href": href,
+                "type": self.services[service_name]["type"],
+                "authorization": self.services[service_name]["authorization"]
+            })
         self.node_data["clocks"] = list(itervalues(self.clocks))
         self.node_data["version"] = str(ptptime.ptp_detail()[0]) + ":" + str(ptptime.ptp_detail()[1])
         try:
@@ -245,7 +249,7 @@ class FacadeRegistry(object):
         except Exception as e:
             self.logger.writeError("Exception re-registering node: {}".format(e))
 
-    def register_service(self, name, srv_type, pid, href=None, proxy_path=None):
+    def register_service(self, name, srv_type, pid, href=None, proxy_path=None, authorization=False):
         if name in self.services:
             return RES_EXISTS
 
@@ -256,7 +260,8 @@ class FacadeRegistry(object):
             "pid": pid,
             "href": href,
             "proxy_path": proxy_path,
-            "type": srv_type
+            "type": srv_type,
+            "authorization": authorization
         }
 
         for resource_name in self.permitted_resources:
@@ -312,7 +317,14 @@ class FacadeRegistry(object):
         return self._register(service_name, "resource", pid, type, key, value)
 
     def register_control(self, service_name, pid, device_id, control_data):
-        return self._register(service_name, "control", pid, device_id, "add", control_data)
+        return self._register(
+            service_name=service_name,
+            namespace="control",
+            pid=pid,
+            type=device_id,
+            key="add",
+            value=control_data
+        )
 
     def _register(self, service_name, namespace, pid, type, key, value):
         if namespace != "control":

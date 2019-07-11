@@ -157,13 +157,15 @@ class NodeFacadeService:
             endpoints.append({
                 "host": HOST,
                 "port": DNS_SD_HTTP_PORT,  # Everything should go via apache proxy
-                "protocol": "http"
+                "protocol": "http",
+                "authorization": OAUTH_MODE
             })
         if HTTPS_MODE != "disabled":
             endpoints.append({
                 "host": HOST,
                 "port": DNS_SD_HTTPS_PORT,  # Everything should go via apache proxy
-                "protocol": "https"
+                "protocol": "https",
+                "authorization": OAUTH_MODE
             })
         return endpoints
 
