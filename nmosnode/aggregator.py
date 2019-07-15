@@ -47,6 +47,10 @@ class NoAggregator(Exception):
         super(NoAggregator, self).__init__("No Registration API found")
 
 
+class EndOfAggregatorList(Exception):
+    pass
+
+
 class InvalidRequest(Exception):
     def __init__(self, status_code=400, mdns_updater=None):
         if mdns_updater is not None:
@@ -70,6 +74,7 @@ class Aggregator(object):
         self.logger = Logger("aggregator_proxy", logger)
         self.mdnsbridge = IppmDNSBridge(logger=self.logger)
         self.aggregator = ""
+        self.aggregators = []
         self.registration_order = ["device", "source", "flow", "sender", "receiver"]
         self._mdns_updater = mdns_updater
         # 'registered' is a local mirror of aggregated items. There are helper methods
@@ -84,12 +89,35 @@ class Aggregator(object):
         }
         self._running = True
         self._reg_queue = gevent.queue.Queue()
-        self.heartbeat_thread = gevent.spawn(self._heartbeat)
+        self.heartbeat_thread = gevent.spawn(self._heartbeat_thread)
         self.queue_thread = gevent.spawn(self._process_queue)
+
+    def _heartbeat(self):
+        try:
+            self.logger.writeDebug("Sending heartbeat for Node {}"
+                                   .format(self._registered["node"]["data"]["id"]))
+            self._SEND("POST", "/health/nodes/" + self._registered["node"]["data"]["id"])
+        except InvalidRequest as e:
+            if e.status_code == 404:
+                # Re-register
+                self.logger.writeWarning("404 error on heartbeat. Marking Node for re-registration")
+                self._registered["registered"] = False
+
+                if(self._mdns_updater is not None):
+                    self._mdns_updater.inc_P2P_enable_count()
+            else:
+                # Client side error. Report this upwards via exception, but don't resend
+                self.logger.writeError("Unrecoverable error code {} received from Registration API on heartbeat"
+                                       .format(e.status_code))
+                self._running = False
+        except Exception:
+            # Re-register
+            self.logger.writeWarning("Unexpected error on heartbeat. Marking Node for re-registration")
+            self._registered["registered"] = False
 
     # The heartbeat thread runs in the background every five seconds.
     # If when it runs the Node is believed to be registered it will perform a heartbeat
-    def _heartbeat(self):
+    def _heartbeat_thread(self):
         self.logger.writeDebug("Starting heartbeat thread")
         while self._running:
             heartbeat_wait = 5
@@ -97,31 +125,12 @@ class Aggregator(object):
                 self._process_reregister()
             elif self._registered["node"]:
                 # Do heartbeat
-                try:
-                    self.logger.writeDebug("Sending heartbeat for Node {}"
-                                           .format(self._registered["node"]["data"]["id"]))
-                    self._SEND("POST", "/health/nodes/" + self._registered["node"]["data"]["id"])
-                except InvalidRequest as e:
-                    if e.status_code == 404:
-                        # Re-register
-                        self.logger.writeWarning("404 error on heartbeat. Marking Node for re-registration")
-                        self._registered["registered"] = False
-
-                        if(self._mdns_updater is not None):
-                            self._mdns_updater.inc_P2P_enable_count()
-                    else:
-                        # Client side error. Report this upwards via exception, but don't resend
-                        self.logger.writeError("Unrecoverable error code {} received from Registration API on heartbeat"
-                                               .format(e.status_code))
-                        self._running = False
-                except Exception:
-                    # Re-register
-                    self.logger.writeWarning("Unexpected error on heartbeat. Marking Node for re-registration")
-                    self._registered["registered"] = False
+                self._heartbeat()
             else:
                 self._registered["registered"] = False
                 if(self._mdns_updater is not None):
                     self._mdns_updater.inc_P2P_enable_count()
+
             while heartbeat_wait > 0 and self._running:
                 gevent.sleep(1)
                 heartbeat_wait -= 1
@@ -308,19 +317,10 @@ class Aggregator(object):
                 "api_version": AGGREGATOR_APIVERSION,
                 "registered": self._registered["registered"]}
 
-    def _get_api_href(self):
-        protocol = "http"
-        if _config.get('https_mode') == "enabled":
-            protocol = "https"
-        api_href = self.mdnsbridge.getHref(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, protocol)
-        if api_href == "":
-            api_href = self.mdnsbridge.getHref(LEGACY_REG_MDNSTYPE, None, AGGREGATOR_APIVERSION, protocol)
-        return api_href
-
     # Handle sending all requests to the Registration API, and searching for a new 'aggregator' if one fails
     def _SEND(self, method, url, data=None):
         if self.aggregator == "":
-            self.aggregator = self._get_api_href()
+            self._change_aggregator()
 
         headers = None
         if data is not None:
@@ -329,9 +329,6 @@ class Aggregator(object):
 
         url = AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url
         for i in range(0, 3):
-            if self.aggregator == "":
-                self.logger.writeWarning("No aggregator available on the network or mdnsbridge unavailable")
-                raise NoAggregator(self._mdns_updater)
 
             self.logger.writeDebug("{} {}".format(method, urljoin(self.aggregator, url)))
 
@@ -373,10 +370,59 @@ class Aggregator(object):
                 self.logger.writeWarning("{} from aggregator {}".format(ex, self.aggregator))
 
             # This aggregator is non-functional
-            self.aggregator = self._get_api_href()
+            self._change_aggregator()
             self.logger.writeInfo("Updated aggregator to {} (try {})".format(self.aggregator, i))
 
         raise TooManyRetries(self._mdns_updater)
+
+    def _change_aggregator(self):
+        """When a Node encounter a HTTP 5xx, Inability To Connect, Or A Timeout from a server, this indicates a server
+        side error. When this occurs the Node should try using a new aggregator, by sending a heartbeat to confirm the
+        Node is still present in the registry.
+        HTTP 200 response - Node present in registry
+        HTTP 404 response - Re-register
+        HTTP 500 response - Try next registry, if all fail backoff"""
+
+        # Get new aggregator
+        self.aggregator = self._get_service_href()
+
+        # Send heartbeat
+        # self._heartbeat()
+        # If success continue
+
+        # 404 Flag Re-Register
+
+        # 500 Try again until end of list
+
+    def _get_service_href(self):
+        """Get the next valid aggregator href
+        If no valid aggregators found, raise NoAggregator exception
+        If last aggregator in list used, raise EndOfAggregatorList exception"""
+
+        if not self.aggregators:  # List empty
+            # Try update the list
+            self.aggregators = self._get_api_href_list()
+            if not self.aggregators:
+                self.logger.writeWarning("No aggregator available on the network or mdnsbridge unavailable")
+                raise NoAggregator(self._mdns_updater)
+
+            # If already using an aggregator
+            if self.aggregator != "":
+                raise EndOfAggregatorList
+
+        return self.aggregators.pop(0)
+
+    def _get_api_href_list(self):
+        protocol = "http"
+        if _config.get('https_mode') == "enabled":
+            protocol = "https"
+
+        api_href_list = self.mdnsbridge.getHrefList(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, protocol)
+
+        if not api_href_list:
+            api_href_list = self.mdnsbridge.getHrefList(LEGACY_REG_MDNSTYPE, None, AGGREGATOR_APIVERSION, protocol)
+
+        return api_href_list
 
 
 class MDNSUpdater(object):

@@ -23,10 +23,10 @@ import mock
 import gevent
 import json
 import requests
-import traceback
+import copy
 from nmosnode.aggregator import Aggregator, InvalidRequest, REGISTRATION_MDNSTYPE, AGGREGATOR_APIVERSION
 from nmosnode.aggregator import NoAggregator, AGGREGATOR_APINAMESPACE, LEGACY_REG_MDNSTYPE, AGGREGATOR_APINAME
-from nmosnode.aggregator import TooManyRetries
+from nmosnode.aggregator import TooManyRetries, NoAggregator, EndOfAggregatorList
 import nmosnode
 
 MAX_ITERATIONS = 10
@@ -69,7 +69,7 @@ class TestAggregator(unittest.TestCase):
         self.assertEqual(a.logger, self.mocks['nmosnode.aggregator.Logger'].return_value)
         self.mocks['nmosnode.aggregator.IppmDNSBridge'].assert_called_once_with(logger=a.logger)
         self.assertEqual(a._reg_queue, self.mocks['gevent.queue.Queue'].return_value)
-        self.assertEqual(a.heartbeat_thread.thread_function, a._heartbeat)
+        self.assertEqual(a.heartbeat_thread.thread_function, a._heartbeat_thread)
         self.assertEqual(a.queue_thread.thread_function, a._process_queue)
 
     def test_register_into(self):
@@ -169,7 +169,7 @@ class TestAggregator(unittest.TestCase):
         with mock.patch('gevent.sleep', side_effect=killloop):
             with mock.patch.object(a, '_process_reregister') as procreg:
                 with mock.patch.object(a, '_SEND') as SEND:
-                    a._heartbeat()
+                    a._heartbeat_thread()
 
                     procreg.assert_called_with()
                     SEND.assert_not_called()
@@ -188,7 +188,7 @@ class TestAggregator(unittest.TestCase):
         with mock.patch('gevent.sleep', side_effect=killloop):
             with mock.patch.object(a, '_process_reregister') as procreg:
                 with mock.patch.object(a, '_SEND') as SEND:
-                    a._heartbeat()
+                    a._heartbeat_thread()
 
                     procreg.assert_not_called()
                     SEND.assert_not_called()
@@ -209,7 +209,7 @@ class TestAggregator(unittest.TestCase):
         with mock.patch('gevent.sleep', side_effect=killloop):
             with mock.patch.object(a, '_process_reregister') as procreg:
                 with mock.patch.object(a, '_SEND') as SEND:
-                    a._heartbeat()
+                    a._heartbeat_thread()
 
                     procreg.assert_not_called()
                     SEND.assert_called_with("POST", "/health/nodes/" + DUMMYNODEID)
@@ -230,7 +230,7 @@ class TestAggregator(unittest.TestCase):
         with mock.patch('gevent.sleep', side_effect=killloop):
             with mock.patch.object(a, '_process_reregister') as procreg:
                 with mock.patch.object(a, '_SEND', side_effect=InvalidRequest(status_code=404)) as SEND:
-                    a._heartbeat()
+                    a._heartbeat_thread()
 
                     procreg.assert_not_called()
                     SEND.assert_called_with("POST", "/health/nodes/" + DUMMYNODEID)
@@ -250,7 +250,7 @@ class TestAggregator(unittest.TestCase):
         with mock.patch('gevent.sleep', side_effect=killloop) as sleep:
             with mock.patch.object(a, '_process_reregister') as procreg:
                 with mock.patch.object(a, '_SEND', side_effect=InvalidRequest(status_code=500)) as SEND:
-                    a._heartbeat()
+                    a._heartbeat_thread()
 
                     procreg.assert_not_called()
                     SEND.assert_called_with("POST", "/health/nodes/" + DUMMYNODEID)
@@ -271,7 +271,7 @@ class TestAggregator(unittest.TestCase):
         with mock.patch('gevent.sleep', side_effect=killloop):
             with mock.patch.object(a, '_process_reregister') as procreg:
                 with mock.patch.object(a, '_SEND', side_effect=Exception) as SEND:
-                    a._heartbeat()
+                    a._heartbeat_thread()
 
                     procreg.assert_not_called()
                     SEND.assert_called_with("POST", "/health/nodes/" + DUMMYNODEID)
@@ -773,6 +773,7 @@ class TestAggregator(unittest.TestCase):
             "http://example0.com/aggregator/",
             "http://example1.com/aggregator/",
             "http://example2.com/aggregator/"],
+        aggregator_loops=3,
         request=None,
         expected_return=None,
         expected_exception=None,
@@ -792,13 +793,10 @@ class TestAggregator(unittest.TestCase):
 
         If any of the SEND attempts succeeds then the routine exits immediately successfully."""
 
-        aggregator_urls_queue = [x for x in aggregator_urls]
-
-        def _get_href(_1, _2, _3, _4):
-            if len(aggregator_urls_queue) == 0:
-                return ""
-            else:
-                return aggregator_urls_queue.pop(0)
+        if aggregator_urls:
+            aggregator_urls_queue = [x for x in aggregator_urls]
+        else:
+            aggregator_urls_queue = None
 
         def create_mock_request(method, url, aggregator_url, expected_data, headers, prefer_ipv6=False):
             if not prefer_ipv6:
@@ -823,8 +821,18 @@ class TestAggregator(unittest.TestCase):
                     timeout=1.0,
                     proxies={'http': ''}))
 
+        class looper:
+            num_calls = 0
+            threshold = aggregator_loops
+        def return_list(*args, **kwargs):
+            looper.num_calls += 1
+            return_val = copy.copy(aggregator_urls_queue)
+            if looper.num_calls > looper.threshold:
+                return_val = []
+            return return_val
+
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a.mdnsbridge.getHref.side_effect = _get_href
+        a.mdnsbridge.getHrefList.side_effect = return_list  # iter([aggregator_urls_queue, []])
         a.aggregator = initial_aggregator
 
         expected_gethref_calls = []
@@ -836,32 +844,35 @@ class TestAggregator(unittest.TestCase):
         else:
             expected_data = None
 
-        while len(aggregator_urls) < 3:
-            aggregator_urls.append("")
-
         expected_request_calls = []
         if to_point >= self.SEND_ITERATION_0:
             expected_request_calls.append(
                 create_mock_request(method, url, aggregator_urls[0], expected_data, headers, prefer_ipv6))
         if to_point > self.SEND_ITERATION_0:
-            expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
+            b = 1
+            #expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
         if to_point >= self.SEND_ITERATION_1:
             expected_request_calls.append(
                 create_mock_request(method, url, aggregator_urls[1], expected_data, headers, prefer_ipv6))
         if to_point > self.SEND_ITERATION_1:
-            expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
+            b = 1
+            #expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
         if to_point >= self.SEND_ITERATION_2:
             expected_request_calls.append(
                 create_mock_request(method, url, aggregator_urls[2], expected_data, headers, prefer_ipv6))
         if to_point > self.SEND_ITERATION_2:
-            expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
+            b = 1
+            #expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
 
-        if to_point in (self.SEND_AGGREGATOR_EMPTY_CHECK_0, self.SEND_AGGREGATOR_EMPTY_CHECK_1, self.SEND_AGGREGATOR_EMPTY_CHECK_2):
+        if to_point == self.SEND_AGGREGATOR_EMPTY_CHECK_0:
             expected_exception = NoAggregator
             expected_gethref_calls.append(mock.call(LEGACY_REG_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
+        elif to_point in (self.SEND_AGGREGATOR_EMPTY_CHECK_1, self.SEND_AGGREGATOR_EMPTY_CHECK_2):
+            expected_exception = EndOfAggregatorList
+            expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
         elif to_point == self.SEND_TOO_MANY_RETRIES:
-            expected_exception = TooManyRetries
-            expected_gethref_calls.append(mock.call(LEGACY_REG_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
+            expected_exception = EndOfAggregatorList
+            expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
 
         with mock.patch.dict(nmosnode.aggregator._config, {'prefer_ipv6': prefer_ipv6}):
             with mock.patch("requests.request", side_effect=request) as _request:
@@ -873,9 +884,9 @@ class TestAggregator(unittest.TestCase):
                     try:
                         R = a._SEND(method, url, data)
                     except Exception as e:
-                        self.fail(msg="_SEND threw an unexpected exception, %s" % (traceback.format_exception(e)))
+                        self.fail(msg="_SEND threw an unexpected exception, {}".format(e))
 
-                self.assertListEqual(a.mdnsbridge.getHref.mock_calls, expected_gethref_calls)
+                self.assertListEqual(a.mdnsbridge.getHrefList.mock_calls, expected_gethref_calls)
                 self.assertListEqual(_request.mock_calls, expected_request_calls)
                 self.assertEqual(R, expected_return)
 
@@ -942,21 +953,21 @@ class TestAggregator(unittest.TestCase):
         if it fails it will fail."""
         def request(*args, **kwargs):
             return None
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1, request=request, aggregator_urls=["http://example.com/aggregator/", ])
+        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1, request=request, aggregator_urls=["http://example.com/aggregator/"])
 
     def test_send_get_which_raises_with_only_one_aggregator_fails_at_second_checkpoint(self):
         """If the first attempt at sending throws an Exception then the SEND routine will try to get an alternative
         href, if it fails it will fail."""
         def request(*args, **kwargs):
             raise requests.exceptions.RequestException
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1, request=request, aggregator_urls=["http://example.com/aggregator/", ])
+        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1, request=request, aggregator_urls=["http://example.com/aggregator/"])
 
     def test_send_get_which_returns_500_with_only_one_aggregator_fails_at_second_checkpoint(self):
         """If the first attempt at sending returns a 500 error then the SEND routine will try to get an alternative
         href, if it fails it will fail."""
         def request(*args, **kwargs):
-            return mock.MagicMock(status_code = 500)
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1, request=request, aggregator_urls=["http://example.com/aggregator/", ])
+            return mock.MagicMock(status_code=500)
+        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1, request=request, aggregator_urls=["http://example.com/aggregator/"])
 
     def test_send_get_which_fails_then_returns_400_raises_exception(self):
         """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
@@ -1119,4 +1130,49 @@ class TestAggregator(unittest.TestCase):
         If the third attempt at sending times out then the SEND routine will fail."""
         def request(*args, **kwargs):
             return None
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_TOO_MANY_RETRIES, request=request)
+        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_TOO_MANY_RETRIES, request=request, aggregator_loops=2)
+
+    def test_send_get_which_fails_on_three_500_responses(self):
+        """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
+        If the second attempt at sending times out then the SEND routine will try to get an alternative href.
+        If the third attempt at sending times out then the SEND routine will fail."""
+        def request(*args, **kwargs):
+            return mock.MagicMock(status_code=500, headers={}, content={})
+        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_TOO_MANY_RETRIES, request=request, aggregator_loops=2)
+
+    def test_get_service_returns_services(self):
+        """Test that an exception is raised when No Aggregators found"""
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        test_aggregators = ['example0.com', 'example1.com', 'example2.com', 'example3.com']
+        a.aggregators = copy.copy(test_aggregators)
+        a.mdnsbridge.getHrefList.return_value = ['example4.com']
+
+        for agg in test_aggregators:
+            a._change_aggregator()
+            self.assertEqual(a.aggregator, agg)
+
+        with self.assertRaises(EndOfAggregatorList):
+            a._change_aggregator()
+            self.assertEqual(a.aggregator, "")
+
+    def test_get_service_raises_exception_when_no_aggregators(self):
+        """Test that an exception is raised when No Aggregators found"""
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a.aggregators = []
+        a.mdnsbridge.getHrefList.return_value = []
+
+        with self.assertRaises(NoAggregator):
+            a._get_service_href()
+
+    def test_get_service_raises_exception_when_end_list(self):
+        """Test that an exception is raised when last aggregator has been used"""
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        test_aggregators = ['example0.com']
+        a.aggregator = "example0.com"
+        a.aggregators = []
+        a.mdnsbridge.getHrefList.return_value = test_aggregators
+
+        with self.assertRaises(EndOfAggregatorList):
+            a._get_service_href()
+            self.assertListEqual(a.aggregators, test_aggregators)
+            self.assertEqual(a.aggregator, "")
