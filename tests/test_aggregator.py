@@ -773,7 +773,6 @@ class TestAggregator(unittest.TestCase):
             "http://example0.com/aggregator/",
             "http://example1.com/aggregator/",
             "http://example2.com/aggregator/"],
-        aggregator_loops=3,
         request=None,
         expected_return=None,
         expected_exception=None,
@@ -821,15 +820,8 @@ class TestAggregator(unittest.TestCase):
                     timeout=1.0,
                     proxies={'http': ''}))
 
-        class looper:
-            num_calls = 0
-            threshold = aggregator_loops
         def return_list(*args, **kwargs):
-            looper.num_calls += 1
-            return_val = copy.copy(aggregator_urls_queue)
-            if looper.num_calls > looper.threshold:
-                return_val = []
-            return return_val
+            return copy.copy(aggregator_urls_queue)
 
         a = Aggregator(mdns_updater=mock.MagicMock())
         a.mdnsbridge.getHrefList.side_effect = return_list  # iter([aggregator_urls_queue, []])
@@ -892,19 +884,27 @@ class TestAggregator(unittest.TestCase):
 
     def test_send_get_with_no_aggregators_fails_at_first_checkpoint(self):
         """If there are no aggregators then the SEND method will fail immediately"""
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_0, aggregator_urls=[])
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_0,
+                                        aggregator_urls=[])
 
     def test_send_get_which_returns_400_raises_exception(self):
         """If the first attempt at sending gives a 400 error then the SEND method will raise it."""
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=400)
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_0, request=request, expected_exception=InvalidRequest)
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_ITERATION_0,
+                                        request=request,
+                                        expected_exception=InvalidRequest)
 
     def test_send_get_which_returns_204_returns_nothing(self):
         """If the first attempt at sending gives a 204 success then the SEND method will return normally."""
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=204)
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_0, request=request, expected_return=None)
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_ITERATION_0,
+                                        request=request,
+                                        expected_return=None)
 
     def test_send_put_which_returns_204_returns_nothing(self):
         """If the first attempt at sending gives a 204 success then the SEND method will return normally."""
@@ -914,29 +914,47 @@ class TestAggregator(unittest.TestCase):
 
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=204)
-        self.assert_send_runs_correctly("PUT", "/dummy/url", data=data, headers={"Content-Type": "application/json"}, to_point=self.SEND_ITERATION_0, request=request, expected_return=None)
+        self.assert_send_runs_correctly("PUT", "/dummy/url",
+                                        data=data,
+                                        headers={"Content-Type": "application/json"},
+                                        to_point=self.SEND_ITERATION_0,
+                                        request=request,
+                                        expected_return=None)
 
     def test_send_get_which_returns_200_returns_content(self):
         """If the first attempt at sending gives a 200 success then the SEND method will return normally with a body."""
         TEST_CONTENT = "kasjhdlkhnjgsnhjhgwhudjdndjhnrhg;kduhjhnf"
+
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=200, headers={}, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_0, request=request, expected_return=TEST_CONTENT)
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_ITERATION_0,
+                                        request=request,
+                                        expected_return=TEST_CONTENT)
 
     def test_send_over_ipv6_get_which_returns_200_returns_content(self):
         """If the first attempt at sending gives a 200 success then the SEND method will return normally with a body
         over ipv6."""
         TEST_CONTENT = "kasjhdlkhnjgsnhjhgwhudjdndjhnrhg;kduhjhnf"
+
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=200, headers={}, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_0, request=request, expected_return=TEST_CONTENT, prefer_ipv6=True)
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_ITERATION_0,
+                                        request=request,
+                                        expected_return=TEST_CONTENT,
+                                        prefer_ipv6=True)
 
     def test_send_get_which_returns_201_returns_content(self):
         """If the first attempt at sending gives a 201 success then the SEND method will return normally with a body."""
         TEST_CONTENT = "kasjhdlkhnjgsnhjhgwhudjdndjhnrhg;kduhjhnf"
+
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=201, headers={}, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_0, request=request, expected_return=TEST_CONTENT)
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_ITERATION_0,
+                                        request=request,
+                                        expected_return=TEST_CONTENT)
 
     def test_send_get_which_returns_200_and_json_returns_json(self):
         """If the first attempt at sending gives a 200 success then the SEND method will return normally and decode
@@ -944,30 +962,43 @@ class TestAggregator(unittest.TestCase):
         TEST_CONTENT = {
             "foo": "bar",
             "baz": ["potato", "sundae"]}
+            
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=200, headers={"content-type": "application/json"}, json=mock.MagicMock(return_value=TEST_CONTENT))
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_0, request=request, expected_return=TEST_CONTENT)
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_ITERATION_0,
+                                        request=request,
+                                        expected_return=TEST_CONTENT)
 
     def test_send_get_which_fails_with_only_one_aggregator_fails_at_second_checkpoint(self):
         """If the first attempt at sending times out then the SEND routine will try to get an alternative href,
         if it fails it will fail."""
         def request(*args, **kwargs):
             return None
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1, request=request, aggregator_urls=["http://example.com/aggregator/"])
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1,
+                                        request=request,
+                                        aggregator_urls=["http://example.com/aggregator/"])
 
     def test_send_get_which_raises_with_only_one_aggregator_fails_at_second_checkpoint(self):
         """If the first attempt at sending throws an Exception then the SEND routine will try to get an alternative
         href, if it fails it will fail."""
         def request(*args, **kwargs):
             raise requests.exceptions.RequestException
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1, request=request, aggregator_urls=["http://example.com/aggregator/"])
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1,
+                                        request=request,
+                                        aggregator_urls=["http://example.com/aggregator/"])
 
     def test_send_get_which_returns_500_with_only_one_aggregator_fails_at_second_checkpoint(self):
         """If the first attempt at sending returns a 500 error then the SEND routine will try to get an alternative
         href, if it fails it will fail."""
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=500)
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1, request=request, aggregator_urls=["http://example.com/aggregator/"])
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1,
+                                        request=request,
+                                        aggregator_urls=["http://example.com/aggregator/"])
 
     def test_send_get_which_fails_then_returns_400_raises_exception(self):
         """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
@@ -980,7 +1011,10 @@ class TestAggregator(unittest.TestCase):
                 return None
             else:
                 return mock.MagicMock(status_code=400)
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_1, request=request, expected_exception=InvalidRequest)
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_ITERATION_1,
+                                        request=request,
+                                        expected_exception=InvalidRequest)
 
     def test_send_get_which_fails_then_returns_204_returns_nothing(self):
         """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
@@ -993,12 +1027,16 @@ class TestAggregator(unittest.TestCase):
                 return None
             else:
                 return mock.MagicMock(status_code=204)
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_1, request=request, expected_return=None)
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_ITERATION_1,
+                                        request=request,
+                                        expected_return=None)
 
     def test_send_get_which_fails_then_returns_200_returns_content(self):
         """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
         If the second attempt returns a 200 then it will return the body sent back by the remote aggregator"""
         TEST_CONTENT = "kasjhdlkhnjgsnhjhgwhudjdndjhnrhg;kduhjhnf"
+
         class scoper:
             num_calls = 0
         def request(*args, **kwargs):
@@ -1007,12 +1045,16 @@ class TestAggregator(unittest.TestCase):
                 return None
             else:
                 return mock.MagicMock(status_code=200, headers={}, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_1, request=request, expected_return=TEST_CONTENT)
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_ITERATION_1,
+                                        request=request,
+                                        expected_return=TEST_CONTENT)
 
     def test_send_get_which_fails_then_returns_201_returns_content(self):
         """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
         If the second attempt returns a 201 then it will return the body sent back by the remote aggregator"""
         TEST_CONTENT = "kasjhdlkhnjgsnhjhgwhudjdndjhnrhg;kduhjhnf"
+        
         class scoper:
             num_calls = 0
         def request(*args, **kwargs):
@@ -1021,7 +1063,10 @@ class TestAggregator(unittest.TestCase):
                 return None
             else:
                 return mock.MagicMock(status_code=201, headers={}, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_1, request=request, expected_return=TEST_CONTENT)
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_ITERATION_1,
+                                        request=request,
+                                        expected_return=TEST_CONTENT)
 
     def test_send_get_which_fails_then_returns_200_and_json_returns_content(self):
         """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
@@ -1030,6 +1075,7 @@ class TestAggregator(unittest.TestCase):
         TEST_CONTENT = {
             "foo": "bar",
             "baz": ["potato", "sundae"]}
+
         class scoper:
             num_calls = 0
         def request(*args, **kwargs):
@@ -1038,7 +1084,10 @@ class TestAggregator(unittest.TestCase):
                 return None
             else:
                 return mock.MagicMock(status_code=200, headers={"content-type": "application/json"}, json=mock.MagicMock(return_value=TEST_CONTENT))
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_1, request=request, expected_return=TEST_CONTENT)
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_ITERATION_1,
+                                        request=request,
+                                        expected_return=TEST_CONTENT)
 
     def test_send_get_which_fails_with_only_two_aggregators_fails_at_third_checkpoint(self):
         """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
@@ -1046,7 +1095,10 @@ class TestAggregator(unittest.TestCase):
         If it fails then the call fails."""
         def request(*args, **kwargs):
             return None
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_2, request=request, aggregator_urls=["http://example.com/aggregator/", "http://example1.com/aggregator/"])
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_2,
+                                        request=request,
+                                        aggregator_urls=["http://example.com/aggregator/", "http://example1.com/aggregator/"])
 
     def test_send_get_which_fails_twice_then_returns_400_raises_exception(self):
         """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
@@ -1060,7 +1112,10 @@ class TestAggregator(unittest.TestCase):
                 return None
             else:
                 return mock.MagicMock(status_code=400)
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_2, request=request, expected_exception=InvalidRequest)
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_ITERATION_2,
+                                        request=request,
+                                        expected_exception=InvalidRequest)
 
     def test_send_get_which_fails_twice_then_returns_204_returns_nothing(self):
         """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
@@ -1074,13 +1129,17 @@ class TestAggregator(unittest.TestCase):
                 return None
             else:
                 return mock.MagicMock(status_code=204)
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_2, request=request, expected_return=None)
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_ITERATION_2,
+                                        request=request,
+                                        expected_return=None)
 
     def test_send_get_which_fails_twice_then_returns_200_returns_content(self):
         """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
         If the second attempt at sending times out then the SEND routine will try to get an alternative href.
         If the third attempt returns a 200 then it returns the body sent back."""
         TEST_CONTENT = "kasjhdlkhnjgsnhjhgwhudjdndjhnrhg;kduhjhnf"
+
         class scoper:
             num_calls = 0
         def request(*args, **kwargs):
@@ -1089,13 +1148,17 @@ class TestAggregator(unittest.TestCase):
                 return None
             else:
                 return mock.MagicMock(status_code=200, headers={}, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_2, request=request, expected_return=TEST_CONTENT)
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_ITERATION_2,
+                                        request=request,
+                                        expected_return=TEST_CONTENT)
 
     def test_send_get_which_fails_twice_then_returns_201_returns_content(self):
         """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
         If the second attempt at sending times out then the SEND routine will try to get an alternative href.
         If the third attempt returns a 201 then it returns the body sent back."""
         TEST_CONTENT = "kasjhdlkhnjgsnhjhgwhudjdndjhnrhg;kduhjhnf"
+
         class scoper:
             num_calls = 0
         def request(*args, **kwargs):
@@ -1104,7 +1167,10 @@ class TestAggregator(unittest.TestCase):
                 return None
             else:
                 return mock.MagicMock(status_code=201, headers={}, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_2, request=request, expected_return=TEST_CONTENT)
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_ITERATION_2,
+                                        request=request,
+                                        expected_return=TEST_CONTENT)
 
     def test_send_get_which_fails_twice_then_returns_200_and_json_returns_content(self):
         """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
@@ -1114,6 +1180,7 @@ class TestAggregator(unittest.TestCase):
         TEST_CONTENT = {
             "foo": "bar",
             "baz": ["potato", "sundae"]}
+
         class scoper:
             num_calls = 0
         def request(*args, **kwargs):
@@ -1122,7 +1189,10 @@ class TestAggregator(unittest.TestCase):
                 return None
             else:
                 return mock.MagicMock(status_code=200, headers={"content-type": "application/json"}, json=mock.MagicMock(return_value=TEST_CONTENT))
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_ITERATION_2, request=request, expected_return=TEST_CONTENT)
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_ITERATION_2,
+                                        request=request,
+                                        expected_return=TEST_CONTENT)
 
     def test_send_get_which_fails_on_three_aggregators_raises(self):
         """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
@@ -1130,7 +1200,9 @@ class TestAggregator(unittest.TestCase):
         If the third attempt at sending times out then the SEND routine will fail."""
         def request(*args, **kwargs):
             return None
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_TOO_MANY_RETRIES, request=request, aggregator_loops=2)
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_TOO_MANY_RETRIES,
+                                        request=request)
 
     def test_send_get_which_fails_on_three_500_responses(self):
         """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
@@ -1138,7 +1210,9 @@ class TestAggregator(unittest.TestCase):
         If the third attempt at sending times out then the SEND routine will fail."""
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=500, headers={}, content={})
-        self.assert_send_runs_correctly("GET", "/dummy/url", to_point=self.SEND_TOO_MANY_RETRIES, request=request, aggregator_loops=2)
+        self.assert_send_runs_correctly("GET", "/dummy/url",
+                                        to_point=self.SEND_TOO_MANY_RETRIES,
+                                        request=request)
 
     def test_get_service_returns_services(self):
         """Test that an exception is raised when No Aggregators found"""
