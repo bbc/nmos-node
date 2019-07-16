@@ -7,9 +7,6 @@ monkey.patch_all()
 from nmosnode.nodefacadeservice import NodeFacadeService
 
 import argparse
-import sys
-import json
-import os
 import traceback
 
 
@@ -26,10 +23,7 @@ if __name__ == "__main__":
 
     if args.interactive is not None:
         from gevent.backdoor import BackdoorServer
-        import signal
-        import time
         import threading
-        import traceback
 
         backdoor = BackdoorServer(('127.0.0.1', args.interactive), locals=locals(), banner="""\
 Node Facade in interactive mode
@@ -41,7 +35,6 @@ Use ^D to exit this console to quit.""")
             try:
                 backdoor.serve_forever()
             except:
-                die = True
                 traceback.print_exc()
                 service.stop()
 
