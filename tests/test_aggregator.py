@@ -876,7 +876,6 @@ class TestAggregator(unittest.TestCase):
     SEND_ITERATION_1              = 4
     SEND_AGGREGATOR_EMPTY_CHECK_2 = 5
     SEND_ITERATION_2              = 6
-    SEND_TOO_MANY_RETRIES         = 7
 
     def assert_send_runs_correctly(
         self, method,
@@ -955,29 +954,17 @@ class TestAggregator(unittest.TestCase):
         if to_point >= self.SEND_ITERATION_0:
             expected_request_calls.append(
                 create_mock_request(method, url, aggregator_urls[0], expected_data, headers, prefer_ipv6))
-        if to_point > self.SEND_ITERATION_0:
-            b = 1
-            #expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
         if to_point >= self.SEND_ITERATION_1:
             expected_request_calls.append(
                 create_mock_request(method, url, aggregator_urls[1], expected_data, headers, prefer_ipv6))
-        if to_point > self.SEND_ITERATION_1:
-            b = 1
-            #expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
         if to_point >= self.SEND_ITERATION_2:
             expected_request_calls.append(
                 create_mock_request(method, url, aggregator_urls[2], expected_data, headers, prefer_ipv6))
-        if to_point > self.SEND_ITERATION_2:
-            b = 1
-            #expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
 
         if to_point == self.SEND_AGGREGATOR_EMPTY_CHECK_0:
             expected_exception = NoAggregator
             expected_gethref_calls.append(mock.call(LEGACY_REG_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
         elif to_point in (self.SEND_AGGREGATOR_EMPTY_CHECK_1, self.SEND_AGGREGATOR_EMPTY_CHECK_2):
-            expected_exception = EndOfAggregatorList
-            expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
-        elif to_point == self.SEND_TOO_MANY_RETRIES:
             expected_exception = EndOfAggregatorList
             expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
 
@@ -1309,35 +1296,47 @@ class TestAggregator(unittest.TestCase):
                                         request=request,
                                         expected_return=TEST_CONTENT)
 
-    def test_send_get_which_fails_on_three_aggregators_raises(self):
-        """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the second attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the third attempt at sending times out then the SEND routine will fail."""
-        def request(*args, **kwargs):
-            return None
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_TOO_MANY_RETRIES,
-                                        request=request)
+    def test_send_raise_exception_after_too_many_500_responses(self):
+        """If the first attempt at sending returns a 500 then the SEND routine will try to get an alternative href.
+        If this happens more than 10 times then a TooManyRetries exception should be raised."""
 
-    def test_send_get_which_fails_on_three_500_responses(self):
-        """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the second attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the third attempt at sending times out then the SEND routine will fail."""
+        test_aggregators = []
+        expected_request_calls = []
+        for x in range(0, 11):
+            test_aggregators.append("http://example{}.com/aggregator/".format(x))
+
+        for x in range(0, 10):
+            expected_request_calls.append(mock.call(
+                    "GET",
+                    urljoin(
+                        test_aggregators[x],
+                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + "/dummy/url"
+                    ),
+                    data=None,
+                    headers=None,
+                    timeout=1.0))
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a.aggregators = copy.copy(test_aggregators)
+
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=500, headers={}, content={})
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_TOO_MANY_RETRIES,
-                                        request=request)
+
+        with mock.patch("requests.request", side_effect=request) as _request:
+            with self.assertRaises(TooManyRetries):
+                a._SEND("GET", "/dummy/url")
+
+            self.assertListEqual(_request.mock_calls, expected_request_calls)
 
     def test_get_service_returns_services(self):
-        """Test that an exception is raised when No Aggregators found"""
+        """Test that an exception is raised when all aggregators have been used"""
         a = Aggregator(mdns_updater=mock.MagicMock())
         test_aggregators = ['http://example0.com/aggregator/',
                             'http://example1.com/aggregator/',
                             'http://example2.com/aggregator/',
                             'http://example3.com/aggregator/']
         a.aggregators = copy.copy(test_aggregators)
-        a.mdnsbridge.getHrefList.return_value = ['example4.com']
+        a.mdnsbridge.getHrefList.return_value = ['http://example4.com/aggregator/']
 
         for agg in test_aggregators:
             a._change_aggregator()

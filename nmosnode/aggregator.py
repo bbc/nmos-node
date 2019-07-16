@@ -114,7 +114,7 @@ class Aggregator(object):
                 self.logger.writeError("Unrecoverable error code {} received from Registration API on heartbeat"
                                        .format(e.status_code))
                 self._running = False
-        except EndOfAggregatorList as e:
+        except (EndOfAggregatorList, TooManyRetries) as e:
             self.logger.writeWarning("End of Aggregator list while heartbeating: {}"
                                      .format(e))
             # Start backoff timer to allow aggregator time to recover
@@ -192,7 +192,7 @@ class Aggregator(object):
                                 if self._mdns_updater is not None:
                                     self._mdns_updater.P2P_disable()
 
-                            except EndOfAggregatorList as e:
+                            except (EndOfAggregatorList, TooManyRetries) as e:
                                 self.logger.writeWarning("End of Aggregator list while registering Node: {}"
                                                          .format(e))
                                 # Start backoff timer to allow aggregator time to recover
@@ -219,7 +219,7 @@ class Aggregator(object):
                     else:
                         self.logger.writeWarning("Method {} not supported for Registration API interactions"
                                                  .format(queue_item["method"]))
-                except EndOfAggregatorList as e:
+                except (EndOfAggregatorList, TooManyRetries) as e:
                     self.logger.writeWarning("End of Aggregator list while registering: {}"
                                              .format(e))
                     # Start backoff timer to allow aggregator time to recover
@@ -290,7 +290,7 @@ class Aggregator(object):
         except InvalidRequest as e:
             # 404 etc is ok
             self.logger.writeInfo("Invalid request when deleting Node prior to registration: {}".format(e))
-        except EndOfAggregatorList as e:
+        except (EndOfAggregatorList, TooManyRetries) as e:
             self.logger.writeWarning("End of Aggregator list while deleting: {}"
                                      .format(e))
             if not self._backoff_active:
@@ -322,7 +322,7 @@ class Aggregator(object):
             self._registered["registered"] = True
             if self._mdns_updater is not None:
                 self._mdns_updater.P2P_disable()
-        except EndOfAggregatorList as e:
+        except (EndOfAggregatorList, TooManyRetries) as e:
             self.logger.writeWarning("End of Aggregator list while registering: {}"
                                      .format(e))
             if not self._backoff_active:
@@ -381,7 +381,7 @@ class Aggregator(object):
             headers = {"Content-Type": "application/json"}
 
         url = AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url
-        for i in range(0, 3):
+        for i in range(0, 10):
 
             self.logger.writeDebug("{} {}".format(method, urljoin(self.aggregator, url)))
 
