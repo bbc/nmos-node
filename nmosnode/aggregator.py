@@ -39,6 +39,9 @@ AGGREGATOR_APINAME = "registration"
 LEGACY_REG_MDNSTYPE = "nmos-registration"
 REGISTRATION_MDNSTYPE = "nmos-register"
 
+BACKOFF_INITIAL_TIMOUT_SECONDS = 5
+BACKOFF_MAX_TIMEOUT_SECONDS = 360
+
 
 class NoAggregator(Exception):
     def __init__(self, mdns_updater=None):
@@ -88,6 +91,7 @@ class Aggregator(object):
             }
         }
         self._running = True
+        self._backoff_active = False
         self._reg_queue = gevent.queue.Queue()
         self.heartbeat_thread = gevent.spawn(self._heartbeat_thread)
         self.queue_thread = gevent.spawn(self._process_queue)
@@ -110,6 +114,11 @@ class Aggregator(object):
                 self.logger.writeError("Unrecoverable error code {} received from Registration API on heartbeat"
                                        .format(e.status_code))
                 self._running = False
+        except EndOfAggregatorList as e:
+            self.logger.writeWarning("End of Aggregator list while heartbeating: {}"
+                                     .format(e))
+            # Start backoff timer to allow aggregator time to recover
+            gevent.spawn(self._backoff_timer_thread)
         except Exception:
             # Re-register
             self.logger.writeWarning("Unexpected error on heartbeat. Marking Node for re-registration")
@@ -134,7 +143,27 @@ class Aggregator(object):
             while heartbeat_wait > 0 and self._running:
                 gevent.sleep(1)
                 heartbeat_wait -= 1
+            while self._backoff_active:
+                gevent.sleep(1)
         self.logger.writeDebug("Stopping heartbeat thread")
+
+    def _backoff_timer_thread(self):
+        backoff_timeout = BACKOFF_INITIAL_TIMOUT_SECONDS
+        self.backoff_active = True
+
+        while True:
+            self.logger.writeDebug("Backoff timer enabled for {} seconds".format(backoff_timeout))
+            gevent.sleep(backoff_timeout)
+
+            self._process_reregister()
+
+            if self._registered["registered"]:
+                self._backoff_active = False
+                return
+            else:
+                backoff_timeout = backoff_timeout * 2
+                if backoff_timeout > BACKOFF_MAX_TIMEOUT_SECONDS:
+                    backoff_timeout = BACKOFF_MAX_TIMEOUT_SECONDS
 
     # Provided the Node is believed to be correctly registered, hand off a single request to the SEND method
     # On client error, clear the resource from the local mirror
@@ -143,7 +172,7 @@ class Aggregator(object):
         self.logger.writeDebug("Starting HTTP queue processing thread")
         # Checks queue not empty before quitting to make sure unregister node gets done
         while self._running or (self._registered["registered"] and not self._reg_queue.empty()):
-            if not self._registered["registered"] or self._reg_queue.empty():
+            if not self._registered["registered"] or self._reg_queue.empty() or self._backoff_active:
                 gevent.sleep(1)
             else:
                 try:
@@ -163,6 +192,11 @@ class Aggregator(object):
                                 if self._mdns_updater is not None:
                                     self._mdns_updater.P2P_disable()
 
+                            except EndOfAggregatorList as e:
+                                self.logger.writeWarning("End of Aggregator list while registering Node: {}"
+                                                         .format(e))
+                                # Start backoff timer to allow aggregator time to recover
+                                gevent.spawn(self._backoff_timer_thread)
                             except Exception:
                                 self.logger.writeWarning("Error registering Node: %r" % (traceback.format_exc(),))
 
@@ -185,6 +219,11 @@ class Aggregator(object):
                     else:
                         self.logger.writeWarning("Method {} not supported for Registration API interactions"
                                                  .format(queue_item["method"]))
+                except EndOfAggregatorList as e:
+                    self.logger.writeWarning("End of Aggregator list while registering: {}"
+                                             .format(e))
+                    # Start backoff timer to allow aggregator time to recover
+                    gevent.spawn(self._backoff_timer_thread)
                 except Exception:
                     self._registered["registered"] = False
                     if(self._mdns_updater is not None):
@@ -276,6 +315,12 @@ class Aggregator(object):
             self._registered["registered"] = True
             if self._mdns_updater is not None:
                 self._mdns_updater.P2P_disable()
+        except EndOfAggregatorList as e:
+            self.logger.writeWarning("End of Aggregator list while registering: {}"
+                                     .format(e))
+            if not self._backoff_active:
+                # Start backoff timer to allow aggregator time to recover
+                gevent.spawn(self._backoff_timer_thread)
         except Exception as e:
             self.logger.writeWarning("Error re-registering Node: {}".format(e))
             self.aggregator = ""  # Fallback to prevent us getting stuck if the Reg API issues a 4XX error incorrectly

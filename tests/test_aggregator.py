@@ -27,6 +27,7 @@ import copy
 from nmosnode.aggregator import Aggregator, InvalidRequest, REGISTRATION_MDNSTYPE, AGGREGATOR_APIVERSION
 from nmosnode.aggregator import NoAggregator, AGGREGATOR_APINAMESPACE, LEGACY_REG_MDNSTYPE, AGGREGATOR_APINAME
 from nmosnode.aggregator import TooManyRetries, NoAggregator, EndOfAggregatorList
+from nmosnode.aggregator import BACKOFF_INITIAL_TIMOUT_SECONDS, BACKOFF_MAX_TIMEOUT_SECONDS
 import nmosnode
 
 MAX_ITERATIONS = 10
@@ -581,6 +582,83 @@ class TestAggregator(unittest.TestCase):
                 a._mdns_updater.P2P_disable.assert_called_with()
                 self.assertFalse(a._registered["registered"])
 
+    def test_process_queue_starts_backoff_on_send_exception(self):
+        """If the _SEND method returns EndOfAggregatorList exception, queue should start timer to stop further
+        Calls to the aggregator until timeout"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        DUMMYKEY = "dummykey"
+        DUMMYPARAMKEY = "dummyparamkey"
+        DUMMYPARAMVAL = "dummyparamval"
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._registered["registered"] = True
+        a._registered["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        if "entities" not in a._registered:
+            a._registered["entities"] = {}
+        if "resource" not in a._registered["entities"]:
+            a._registered["entities"]["resource"] = {}
+        if "dummy" not in a._registered["entities"]["resource"]:
+            a._registered["entities"]["resource"]["dummy"] = {}
+        a._registered["entities"]["resource"]["dummy"][DUMMYKEY] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
+
+        queue = [
+            {"method": "POST", "namespace": "resource", "res_type": "dummy", "key": DUMMYKEY},
+            ]
+
+        a._reg_queue.empty.side_effect = lambda: (len(queue) == 0)
+        a._reg_queue.get.side_effect = lambda: queue.pop(0)
+
+        expected_calls = [
+            mock.call('POST', '/resource', a._registered["entities"]["resource"]["dummy"][DUMMYKEY]),
+            ]
+
+        def killloop(*args, **kwargs):
+            a._running = False
+
+        with mock.patch('gevent.sleep', side_effect=killloop):
+            with mock.patch.object(a, '_SEND', side_effect=EndOfAggregatorList) as SEND:
+                a._process_queue()
+
+                SEND.assert_has_calls(expected_calls)
+                a._mdns_updater.P2P_disable.assert_not_called()
+                self.mocks['gevent.spawn'].assert_called_with(a._backoff_timer_thread)
+
+    def test_backoff_thread_timout(self):
+        """Check that the timeout thread, sets and un-sets the backoff flag after a timeout"""
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._registered["registered"] = True
+
+        with mock.patch('gevent.sleep') as timer:
+            with mock.patch.object(a, '_process_reregister'):
+                a._backoff_timer_thread()
+                timer.assert_called_with(BACKOFF_INITIAL_TIMOUT_SECONDS)
+                self.assertFalse(a._backoff_active)
+
+    def test_backoff_thread_timout_after_multiple_failures(self):
+        """Check that the timeout thread, sets and un-sets the backoff flag after multiple timeouts"""
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._registered["registered"] = False
+
+        expected_calls = []
+        for x in range(0, 7):
+            expected_calls.append(mock.call((BACKOFF_INITIAL_TIMOUT_SECONDS) * 2**x))
+        expected_calls.append(mock.call(BACKOFF_MAX_TIMEOUT_SECONDS))
+
+        class scoper:
+            num_calls = 0
+        def re_register(*args, **kwargs):
+            scoper.num_calls += 1
+            if scoper.num_calls < 8:
+                a._registered["registered"] = False
+            else:
+                a._registered["registered"] = True
+
+        with mock.patch('gevent.sleep') as timer:
+            with mock.patch.object(a, '_process_reregister', side_effect=re_register):
+                a._backoff_timer_thread()
+                timer.assert_has_calls(expected_calls)
+                self.assertFalse(a._backoff_active)
+
     # ===================================================================================
     # In order to test the _process_reregister method we define some extra infrastructure
     # ===================================================================================
@@ -824,7 +902,7 @@ class TestAggregator(unittest.TestCase):
             return copy.copy(aggregator_urls_queue)
 
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a.mdnsbridge.getHrefList.side_effect = return_list  # iter([aggregator_urls_queue, []])
+        a.mdnsbridge.getHrefList.side_effect = return_list
         a.aggregator = initial_aggregator
 
         expected_gethref_calls = []
@@ -1217,7 +1295,10 @@ class TestAggregator(unittest.TestCase):
     def test_get_service_returns_services(self):
         """Test that an exception is raised when No Aggregators found"""
         a = Aggregator(mdns_updater=mock.MagicMock())
-        test_aggregators = ['example0.com', 'example1.com', 'example2.com', 'example3.com']
+        test_aggregators = ['http://example0.com/aggregator/',
+                            'http://example1.com/aggregator/',
+                            'http://example2.com/aggregator/',
+                            'http://example3.com/aggregator/']
         a.aggregators = copy.copy(test_aggregators)
         a.mdnsbridge.getHrefList.return_value = ['example4.com']
 
@@ -1248,5 +1329,6 @@ class TestAggregator(unittest.TestCase):
 
         with self.assertRaises(EndOfAggregatorList):
             a._get_service_href()
-            self.assertListEqual(a.aggregators, test_aggregators)
-            self.assertEqual(a.aggregator, "")
+
+        self.assertListEqual(a.aggregators, test_aggregators)
+        self.assertEqual(a.aggregator, test_aggregators[0])
