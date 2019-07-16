@@ -824,9 +824,17 @@ class TestAggregator(unittest.TestCase):
                 return
         self.assert_reregister_runs_correctly(_send=_send)
 
+    def test_process_reregister_bails_if_delete_throws_500_exception(self):
+        """A call to process_reregister where DELETE message throws an EndOfAggregatorList exception should bail"""
+        def _send(method, path, data=None):
+            if method == "DELETE":
+                raise EndOfAggregatorList
+            else:
+                return
+        self.assert_reregister_runs_correctly(_send=_send, to_point=self.REREGISTER_DELETE)
+
     def test_process_reregister_bails_if_delete_throws_unknown_exception(self):
-        """A call to process_reregister where DELETE message throws an unknown exception should delete the current
-        registration, then bail"""
+        """A call to process_reregister where DELETE message throws an unknown exception should bail"""
         def _send(method, path, data=None):
             if method == "DELETE":
                 raise Exception
@@ -841,6 +849,17 @@ class TestAggregator(unittest.TestCase):
         def _send(method, path, data=None):
             if method == "POST":
                 raise Exception
+            else:
+                return
+        self.assert_reregister_runs_correctly(_send=_send, to_point=self.REREGISTER_NODE)
+
+    def test_process_reregister_bails_if_first_post_throws_500_exception(self):
+        """A call to process_reregister where the POST call raises an EndOfAggregatorList exception should still delete 
+        the current registration, increment the P2P enable counter, drain the queue, and try to reregister the node,
+        but should bail before reregistering the resources."""
+        def _send(method, path, data=None):
+            if method == "POST":
+                raise EndOfAggregatorList
             else:
                 return
         self.assert_reregister_runs_correctly(_send=_send, to_point=self.REREGISTER_NODE)

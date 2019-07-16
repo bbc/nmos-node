@@ -290,6 +290,13 @@ class Aggregator(object):
         except InvalidRequest as e:
             # 404 etc is ok
             self.logger.writeInfo("Invalid request when deleting Node prior to registration: {}".format(e))
+        except EndOfAggregatorList as e:
+            self.logger.writeWarning("End of Aggregator list while deleting: {}"
+                                     .format(e))
+            if not self._backoff_active:
+                # Start backoff timer to allow aggregator time to recover
+                gevent.spawn(self._backoff_timer_thread)
+            return
         except Exception as ex:
             # Server error is bad, no point continuing
             self.logger.writeError("Aborting Node re-register! {}".format(ex))
@@ -321,6 +328,7 @@ class Aggregator(object):
             if not self._backoff_active:
                 # Start backoff timer to allow aggregator time to recover
                 gevent.spawn(self._backoff_timer_thread)
+            return
         except Exception as e:
             self.logger.writeWarning("Error re-registering Node: {}".format(e))
             self.aggregator = ""  # Fallback to prevent us getting stuck if the Reg API issues a 4XX error incorrectly
