@@ -25,7 +25,7 @@ import json
 import requests
 import copy
 from nmosnode.aggregator import Aggregator, InvalidRequest, REGISTRATION_MDNSTYPE, AGGREGATOR_APIVERSION
-from nmosnode.aggregator import NoAggregator, AGGREGATOR_APINAMESPACE, LEGACY_REG_MDNSTYPE, AGGREGATOR_APINAME
+from nmosnode.aggregator import AGGREGATOR_APINAMESPACE, LEGACY_REG_MDNSTYPE, AGGREGATOR_APINAME
 from nmosnode.aggregator import TooManyRetries, NoAggregator, EndOfAggregatorList
 from nmosnode.aggregator import BACKOFF_INITIAL_TIMOUT_SECONDS, BACKOFF_MAX_TIMEOUT_SECONDS
 import nmosnode
@@ -56,7 +56,7 @@ class TestAggregator(unittest.TestCase):
 
 #        self.mocks['nmosnode.aggregator.Logger'].return_value.writeInfo.side_effect = printmsg("INFO")
 #        self.mocks['nmosnode.aggregator.Logger'].return_value.writeWarning.side_effect = printmsg("WARNING")
-#        self.mocks['nmosnode.aggregator.Logger'].return_value.writeDebug.side_effect = printmsg("DEBUG")
+        self.mocks['nmosnode.aggregator.Logger'].return_value.writeDebug.side_effect = printmsg("DEBUG")
 #        self.mocks['nmosnode.aggregator.Logger'].return_value.writeError.side_effect = printmsg("ERROR")
 #        self.mocks['nmosnode.aggregator.Logger'].return_value.writeFatal.side_effect = printmsg("FATAL")
 
@@ -239,7 +239,7 @@ class TestAggregator(unittest.TestCase):
                     self.assertFalse(a._registered["registered"])
 
     def test_heartbeat_with_500_exception(self):
-        """If the heartbeat returns a 500 exception then the object should simply exit. This is a bad way."""
+        """If the heartbeat returns a 500 exception from all aggregators then the heartbeat should backoff"""
         DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
         a = Aggregator(mdns_updater=mock.MagicMock())
         a._registered["registered"] = True
@@ -248,15 +248,16 @@ class TestAggregator(unittest.TestCase):
         def killloop(*args, **kwargs):
             a._running = False
 
-        with mock.patch('gevent.sleep', side_effect=killloop) as sleep:
+        with mock.patch('gevent.sleep', side_effect=killloop):
             with mock.patch.object(a, '_process_reregister') as procreg:
-                with mock.patch.object(a, '_SEND', side_effect=InvalidRequest(status_code=500)) as SEND:
+                with mock.patch.object(a, '_SEND', side_effect=EndOfAggregatorList) as SEND:
                     a._heartbeat_thread()
 
                     procreg.assert_not_called()
                     SEND.assert_called_with("POST", "/health/nodes/" + DUMMYNODEID)
                     a._mdns_updater.inc_P2P_enable_count.assert_not_called()
-                    sleep.assert_not_called()
+                    self.mocks['gevent.spawn'].assert_called_with(a._backoff_timer_thread)
+
 
     def test_heartbeat_with_other_exception(self):
         """If an unknown exception is raised during the heartbeat process then the object should reset to unregistered
@@ -278,6 +279,21 @@ class TestAggregator(unittest.TestCase):
                     SEND.assert_called_with("POST", "/health/nodes/" + DUMMYNODEID)
                     a._mdns_updater.inc_P2P_enable_count.assert_not_called()
                     self.assertFalse(a._registered["registered"])
+
+    def test_heartbeat_when_backoff_active(self):
+        """When backoff flag active, heartbeat should not send any heartbeats and loop should sleep"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._registered["registered"] = True
+        a._registered["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        a._backoff_active = True
+
+        with mock.patch('gevent.sleep', side_effect=Exception("Ignore it... just close thread")):
+            with mock.patch.object(a, '_SEND') as SEND:
+                with self.assertRaises(Exception):
+                    a._heartbeat_thread()
+                SEND.assert_not_called()
+                a._mdns_updater.inc_P2P_enable_count.assert_not_called()
 
     def test_process_queue_does_nothing_when_not_registered(self):
         """The queue processing thread should not SEND any messages when the node is not registered."""
@@ -602,14 +618,16 @@ class TestAggregator(unittest.TestCase):
         a._registered["entities"]["resource"]["dummy"][DUMMYKEY] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
 
         queue = [
-            {"method": "POST", "namespace": "resource", "res_type": "dummy", "key": DUMMYKEY},
+            {"method": "POST", "namespace": "resource", "res_type": "node", "key": DUMMYNODEID},
+            {"method": "POST", "namespace": "resource", "res_type": "dummy", "key": DUMMYKEY}
             ]
 
         a._reg_queue.empty.side_effect = lambda: (len(queue) == 0)
         a._reg_queue.get.side_effect = lambda: queue.pop(0)
 
         expected_calls = [
-            mock.call('POST', '/resource', a._registered["entities"]["resource"]["dummy"][DUMMYKEY]),
+            mock.call('POST', '/resource', a._registered["node"]),
+            mock.call('POST', '/resource', a._registered["entities"]["resource"]["dummy"][DUMMYKEY])
             ]
 
         def killloop(*args, **kwargs):

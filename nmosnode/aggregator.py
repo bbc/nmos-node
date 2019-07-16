@@ -129,6 +129,8 @@ class Aggregator(object):
     def _heartbeat_thread(self):
         self.logger.writeDebug("Starting heartbeat thread")
         while self._running:
+            while self._backoff_active:
+                gevent.sleep(1)
             heartbeat_wait = 5
             if not self._registered["registered"]:
                 self._process_reregister()
@@ -143,8 +145,6 @@ class Aggregator(object):
             while heartbeat_wait > 0 and self._running:
                 gevent.sleep(1)
                 heartbeat_wait -= 1
-            while self._backoff_active:
-                gevent.sleep(1)
         self.logger.writeDebug("Stopping heartbeat thread")
 
     def _backoff_timer_thread(self):
