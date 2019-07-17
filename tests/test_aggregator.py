@@ -964,6 +964,8 @@ class TestAggregator(unittest.TestCase):
         if to_point == self.SEND_AGGREGATOR_EMPTY_CHECK_0:
             expected_exception = NoAggregator
             expected_gethref_calls.append(mock.call(LEGACY_REG_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
+            expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
+            expected_gethref_calls.append(mock.call(LEGACY_REG_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
         elif to_point in (self.SEND_AGGREGATOR_EMPTY_CHECK_1, self.SEND_AGGREGATOR_EMPTY_CHECK_2):
             expected_exception = EndOfAggregatorList
             expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
@@ -988,7 +990,7 @@ class TestAggregator(unittest.TestCase):
         """If there are no aggregators then the SEND method will fail immediately"""
         self.assert_send_runs_correctly("GET", "/dummy/url",
                                         to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_0,
-                                        aggregator_urls=[])
+                                        aggregator_urls=None)
 
     def test_send_get_which_returns_400_raises_exception(self):
         """If the first attempt at sending gives a 400 error then the SEND method will raise it."""
@@ -1317,7 +1319,7 @@ class TestAggregator(unittest.TestCase):
                     timeout=1.0))
 
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a.aggregators = copy.copy(test_aggregators)
+        a.mdnsbridge.getHrefList.return_value = copy.copy(test_aggregators)
 
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=500, headers={}, content={})
@@ -1335,16 +1337,17 @@ class TestAggregator(unittest.TestCase):
                             'http://example1.com/aggregator/',
                             'http://example2.com/aggregator/',
                             'http://example3.com/aggregator/']
-        a.aggregators = copy.copy(test_aggregators)
-        a.mdnsbridge.getHrefList.return_value = ['http://example4.com/aggregator/']
+
+        a.mdnsbridge.getHrefList.return_value = copy.copy(test_aggregators)
 
         for agg in test_aggregators:
             a._change_aggregator()
             self.assertEqual(a.aggregator, agg)
 
+        a.mdnsbridge.getHrefList.return_value = copy.copy(test_aggregators)
         with self.assertRaises(EndOfAggregatorList):
             a._change_aggregator()
-            self.assertEqual(a.aggregator, "")
+        self.assertEqual(a.aggregator, "")
 
     def test_get_service_raises_exception_when_no_aggregators(self):
         """Test that an exception is raised when No Aggregators found"""
@@ -1367,4 +1370,4 @@ class TestAggregator(unittest.TestCase):
             a._get_service_href()
 
         self.assertListEqual(a.aggregators, test_aggregators)
-        self.assertEqual(a.aggregator, test_aggregators[0])
+        self.assertEqual(a.aggregator, "")

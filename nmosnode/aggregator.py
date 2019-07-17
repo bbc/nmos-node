@@ -117,8 +117,9 @@ class Aggregator(object):
         except (EndOfAggregatorList, TooManyRetries) as e:
             self.logger.writeWarning("End of Aggregator list while heartbeating: {}"
                                      .format(e))
-            # Start backoff timer to allow aggregator time to recover
-            gevent.spawn(self._backoff_timer_thread)
+            if not self._backoff_active:
+                # Start backoff timer to allow aggregator time to recover
+                gevent.spawn(self._backoff_timer_thread)
         except Exception:
             # Re-register
             self.logger.writeWarning("Unexpected error on heartbeat. Marking Node for re-registration")
@@ -149,7 +150,9 @@ class Aggregator(object):
 
     def _backoff_timer_thread(self):
         backoff_timeout = BACKOFF_INITIAL_TIMOUT_SECONDS
-        self.backoff_active = True
+        self._backoff_active = True
+        self._registered["registered"] = False
+        self.logger.writeDebug("Backoff thread started")
 
         while True:
             self.logger.writeDebug("Backoff timer enabled for {} seconds".format(backoff_timeout))
@@ -195,8 +198,9 @@ class Aggregator(object):
                             except (EndOfAggregatorList, TooManyRetries) as e:
                                 self.logger.writeWarning("End of Aggregator list while registering Node: {}"
                                                          .format(e))
-                                # Start backoff timer to allow aggregator time to recover
-                                gevent.spawn(self._backoff_timer_thread)
+                                if not self._backoff_active:
+                                    # Start backoff timer to allow aggregator time to recover
+                                    gevent.spawn(self._backoff_timer_thread)
                             except Exception:
                                 self.logger.writeWarning("Error registering Node: %r" % (traceback.format_exc(),))
 
@@ -222,8 +226,9 @@ class Aggregator(object):
                 except (EndOfAggregatorList, TooManyRetries) as e:
                     self.logger.writeWarning("End of Aggregator list while registering: {}"
                                              .format(e))
-                    # Start backoff timer to allow aggregator time to recover
-                    gevent.spawn(self._backoff_timer_thread)
+                    if not self._backoff_active:
+                        # Start backoff timer to allow aggregator time to recover
+                        gevent.spawn(self._backoff_timer_thread)
                 except Exception:
                     self._registered["registered"] = False
                     if(self._mdns_updater is not None):
@@ -452,18 +457,20 @@ class Aggregator(object):
         If no valid aggregators found, raise NoAggregator exception
         If last aggregator in list used, raise EndOfAggregatorList exception"""
 
-        if not self.aggregators:  # List empty
-            # Try update the list
+        # First call to get aggregator
+        if self.aggregator == "":
+            self.aggregators = self._get_api_href_list()
+
+        try:
+            return self.aggregators.pop(0)
+        except Exception:
+            self.aggregator = ""
             self.aggregators = self._get_api_href_list()
             if not self.aggregators:
                 self.logger.writeWarning("No aggregator available on the network or mdnsbridge unavailable")
                 raise NoAggregator(self._mdns_updater)
 
-            # If already using an aggregator
-            if self.aggregator != "":
-                raise EndOfAggregatorList
-
-        return self.aggregators.pop(0)
+            raise EndOfAggregatorList
 
     def _get_api_href_list(self):
         protocol = "http"
