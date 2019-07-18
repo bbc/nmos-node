@@ -1,4 +1,4 @@
-# Copyright 2017 British Broadcasting Corporation
+# Copyright 2019 British Broadcasting Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,10 +25,11 @@ class TestFacade(unittest.TestCase):
     def setUp(self):
         paths = ['nmosnode.facade.Logger',
                  'nmosnode.facade.Proxy', ]
-        patchers = { name : mock.patch(name) for name in paths }
-        self.mocks = { name : patcher.start() for (name, patcher) in iteritems(patchers) }
+        patchers = {name: mock.patch(name) for name in paths}
+        self.mocks = {name: patcher.start() for (name, patcher) in iteritems(patchers)}
         for (name, patcher) in iteritems(patchers):
             self.addCleanup(patcher.stop)
+
         def _invoke_named(obj):
             def __inner(method, *args, **kwargs):
                 return getattr(obj, method)(*args, **kwargs)
@@ -50,7 +51,7 @@ class TestFacade(unittest.TestCase):
             self.assertCountEqual = self.assertItemsEqual
 
     def test_setup_ipc(self):
-        address="ipc:///tmp/nmos-nodefacade.dummy.for.test"
+        address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"
         UUT = Facade("dummy_type", address=address)
         UUT.setup_ipc()
 
@@ -58,7 +59,7 @@ class TestFacade(unittest.TestCase):
         self.assertEqual(self.mocks['nmosnode.facade.Proxy'].return_value, UUT.ipc)
 
     def test_setup_ipc_exception_handling(self):
-        address="ipc:///tmp/nmos-nodefacade.dummy.for.test"
+        address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"
         UUT = Facade("dummy_type", address=address)
 
         self.mocks['nmosnode.facade.Proxy'].side_effect = Exception
@@ -69,7 +70,7 @@ class TestFacade(unittest.TestCase):
         self.assertIsNone(UUT.ipc)
 
     def test_register_service(self):
-        address="ipc:///tmp/nmos-nodefacade.dummy.for.test"
+        address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"
         srv_type = "dummy_type"
         UUT = Facade(srv_type, address=address)
 
@@ -84,7 +85,7 @@ class TestFacade(unittest.TestCase):
         self.assertTrue(UUT.srv_registered)
 
     def test_register_service_bails_when_no_ipc(self):
-        address="ipc:///tmp/nmos-nodefacade.dummy.for.test"
+        address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"
         srv_type = "dummy_type"
         UUT = Facade(srv_type, address=address)
 
@@ -98,7 +99,7 @@ class TestFacade(unittest.TestCase):
         self.assertFalse(UUT.srv_registered)
 
     def test_register_service_bails_when_register_fails(self):
-        address="ipc:///tmp/nmos-nodefacade.dummy.for.test"
+        address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"
         srv_type = "dummy_type"
         UUT = Facade(srv_type, address=address)
 
@@ -113,7 +114,7 @@ class TestFacade(unittest.TestCase):
         self.assertFalse(UUT.srv_registered)
 
     def test_register_service_bails_when_register_raises(self):
-        address="ipc:///tmp/nmos-nodefacade.dummy.for.test"
+        address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"
         srv_type = "dummy_type"
         UUT = Facade(srv_type, address=address)
 
@@ -128,7 +129,7 @@ class TestFacade(unittest.TestCase):
         self.assertFalse(UUT.srv_registered)
 
     def test_unregister_service(self):
-        address="ipc:///tmp/nmos-nodefacade.dummy.for.test"
+        address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"
         srv_type = "dummy_type"
         UUT = Facade(srv_type, address=address)
 
@@ -140,7 +141,7 @@ class TestFacade(unittest.TestCase):
         self.assertFalse(UUT.srv_registered)
 
     def test_unregister_service_bails_when_no_ipc(self):
-        address="ipc:///tmp/nmos-nodefacade.dummy.for.test"
+        address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"
         srv_type = "dummy_type"
         UUT = Facade(srv_type, address=address)
 
@@ -153,7 +154,7 @@ class TestFacade(unittest.TestCase):
         self.assertTrue(UUT.srv_registered)
 
     def test_unregister_service_bails_when_unregister_raises(self):
-        address="ipc:///tmp/nmos-nodefacade.dummy.for.test"
+        address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"
         srv_type = "dummy_type"
         UUT = Facade(srv_type, address=address)
 
@@ -167,7 +168,7 @@ class TestFacade(unittest.TestCase):
         self.assertTrue(UUT.srv_registered)
 
     def test_heartbeat_service(self):
-        address="ipc:///tmp/nmos-nodefacade.dummy.for.test"
+        address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"
         srv_type = "dummy_type"
         UUT = Facade(srv_type, address=address)
 
@@ -181,7 +182,7 @@ class TestFacade(unittest.TestCase):
             reregister_all.assert_not_called()
 
     def test_heartbeat_service_bails_when_no_ipc(self):
-        address="ipc:///tmp/nmos-nodefacade.dummy.for.test"
+        address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"
         srv_type = "dummy_type"
         UUT = Facade(srv_type, address=address)
 
@@ -224,7 +225,7 @@ class TestFacade(unittest.TestCase):
 
     def test_heartbeat_service_reregisters_on_success_when_told_to(self):
         """Is this correct? This is current behaviour, but doesn't match the comments"""
-        address="ipc:///tmp/nmos-nodefacade.dummy.for.test"
+        address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"
         srv_type = "dummy_type"
         UUT = Facade(srv_type, address=address)
 
@@ -243,7 +244,7 @@ class TestFacade(unittest.TestCase):
         getattr(self.mocks['nmosnode.facade.Proxy'].return_value, remote_method_name).side_effect = None
         self.mocks['nmosnode.facade.Proxy'].side_effect = None
 
-        address="ipc:///tmp/nmos-nodefacade.dummy.for.test"
+        address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"
         srv_type = "dummy_type"
         UUT = Facade(srv_type, address=address)
 
@@ -302,6 +303,7 @@ class TestFacade(unittest.TestCase):
                 UUT.resources["transport"] = {}
             UUT.resources["flow"]["dummykey"] = 'dummyval'
             UUT.resources["transport"]["dummytransportkey"] = { "flow-id" : "dummykey" }
+
         def _extra_check(UUT):
             self.assertNotIn("dummykey", UUT.resources["flow"])
             self.assertNotIn("dummytransportkey", UUT.resources["transport"])
@@ -315,10 +317,10 @@ class TestFacade(unittest.TestCase):
             self.assertIn("dummyid", UUT.controls)
             self.assertIn("dummyhref", UUT.controls["dummyid"])
             self.assertEqual(UUT.controls["dummyid"]["dummyhref"], { "href" : "dummyhref" })
-        self.assert_method_calls_remote_method_or_bails('addControl', 'control_register', ("dummyid", { "href" : "dummyhref" }), extra_check=_extra_check)
-        self.assert_method_calls_remote_method_or_bails('addControl', 'control_register', ("dummyid", { "href" : "dummyhref" }), registered=False)
-        self.assert_method_calls_remote_method_or_bails('addControl', 'control_register', ("dummyid", { "href" : "dummyhref" }), ipc=False)
-        self.assert_method_calls_remote_method_or_bails('addControl', 'control_register', ("dummyid", { "href" : "dummyhref" }), raises=True)
+        self.assert_method_calls_remote_method_or_bails('addControl', 'control_register', ("dummyid", {"href": "dummyhref"}), extra_check=_extra_check)
+        self.assert_method_calls_remote_method_or_bails('addControl', 'control_register', ("dummyid", {"href": "dummyhref"}), registered=False)
+        self.assert_method_calls_remote_method_or_bails('addControl', 'control_register', ("dummyid", {"href": "dummyhref"}), ipc=False)
+        self.assert_method_calls_remote_method_or_bails('addControl', 'control_register', ("dummyid", {"href": "dummyhref"}), raises=True)
 
     def test_delControl(self):
         def _presetup(UUT):
@@ -327,10 +329,10 @@ class TestFacade(unittest.TestCase):
             UUT.controls["dummyid"]["dummyhref"] = 'dummyval'
         def _extra_check(UUT):
             self.assertNotIn("dummyhref", UUT.controls["dummyid"])
-        self.assert_method_calls_remote_method_or_bails('delControl', 'control_unregister', ("dummyid", { "href" : "dummyhref" }), presetup=_presetup, extra_check=_extra_check)
-        self.assert_method_calls_remote_method_or_bails('delControl', 'control_unregister', ("dummyid", { "href" : "dummyhref" }), registered=False)
-        self.assert_method_calls_remote_method_or_bails('delControl', 'control_unregister', ("dummyid", { "href" : "dummyhref" }), ipc=False)
-        self.assert_method_calls_remote_method_or_bails('delControl', 'control_unregister', ("dummyid", { "href" : "dummyhref" }), raises=True)
+        self.assert_method_calls_remote_method_or_bails('delControl', 'control_unregister', ("dummyid", {"href": "dummyhref"}), presetup=_presetup, extra_check=_extra_check)
+        self.assert_method_calls_remote_method_or_bails('delControl', 'control_unregister', ("dummyid", {"href": "dummyhref"}), registered=False)
+        self.assert_method_calls_remote_method_or_bails('delControl', 'control_unregister', ("dummyid", {"href": "dummyhref"}), ipc=False)
+        self.assert_method_calls_remote_method_or_bails('delControl', 'control_unregister', ("dummyid", {"href": "dummyhref"}), raises=True)
 
     def test_get_node_self(self):
         self.assert_method_calls_remote_method_or_bails('get_node_self', 'self_get', ("v1.1",))
@@ -339,19 +341,20 @@ class TestFacade(unittest.TestCase):
         self.assert_method_calls_remote_method_or_bails('get_node_self', 'self_get', ("v1.1",), raises=True)
 
     def test_debug_message(self):
-        """There's not a lot we can sensibly check here, but we might as well check that every error has a message and that no two errors have the same message"""
-        codes = [ name for name in dir() if name.startswith('FAC_') ]
-        address="ipc:///tmp/nmos-nodefacade.dummy.for.test"
+        """There's not a lot we can sensibly check here, but we might as well check that every error has a message 
+        and that no two errors have the same message"""
+        codes = [name for name in dir() if name.startswith('FAC_') ]
+        address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"
         srv_type = "dummy_type"
         UUT = Facade(srv_type, address=address)
 
-        msgs = [ UUT.debug_message(c) for c in codes ]
+        msgs = [UUT.debug_message(c) for c in codes]
 
         for msg in msgs:
             self.assertEqual(msgs.count(msg), 1)
 
     def test_reregister_all(self):
-        address="ipc:///tmp/nmos-nodefacade.dummy.for.test"
+        address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"
         srv_type = "dummy_type"
         UUT = Facade(srv_type, address=address)
 
@@ -361,23 +364,22 @@ class TestFacade(unittest.TestCase):
         proxy_path = "http://dummyproxy.example.com"
         UUT.register_service(href, proxy_path)
 
-        resources = [ ("type0", "key0", "val0"),
-                      ("type0", "key1", "val1"),
-                      ("type2", "key2", "val2") ]
-        controls = [ ("id0", { "href" : "href0" }),
-                         ("id1", { "href" : "href1" }),
-                         ("id2", { "href" : "href2" }),
-                         ]
+        resources = [("type0", "key0", "val0"),
+                     ("type0", "key1", "val1"),
+                     ("type2", "key2", "val2")]
+        controls = [("id0", {"href": "href0"}),
+                    ("id1", {"href": "href1"}),
+                    ("id2", {"href": "href2"})]
 
         for res in resources:
             UUT.addResource(*res)
-        UUT.addResource("receiver", "rkey", {"pipel_id" : "DUMMY0", "pipeline_id" : "DUMMY1", "dummy" : "DUMMY2" } )
+        UUT.addResource("receiver", "rkey", {"pipel_id": "DUMMY0", "pipeline_id": "DUMMY1", "dummy": "DUMMY2"})
 
         for con in controls:
             UUT.addControl(*con)
 
-        expected_res_register_calls = [ mock.call(srv_type, mock.ANY, *res) for res in resources ] + [ mock.call(srv_type, mock.ANY, "receiver", "rkey", { "dummy" : "DUMMY2" }), ]
-        expected_control_register_calls = [ mock.call(srv_type, mock.ANY, *con) for con in controls ]
+        expected_res_register_calls = [mock.call(srv_type, mock.ANY, *res) for res in resources] + [mock.call(srv_type, mock.ANY, "receiver", "rkey", {"dummy": "DUMMY2"})]
+        expected_control_register_calls = [mock.call(srv_type, mock.ANY, *con) for con in controls]
 
         UUT.ipc.res_register.reset_mock()
         UUT.ipc.control_register.reset_mock()
@@ -390,7 +392,7 @@ class TestFacade(unittest.TestCase):
         self.assertCountEqual(UUT.ipc.control_register.mock_calls, expected_control_register_calls)
 
     def test_reregister_all_bails_if_failed_to_unregister(self):
-        address="ipc:///tmp/nmos-nodefacade.dummy.for.test"
+        address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"
         srv_type = "dummy_type"
         UUT = Facade(srv_type, address=address)
 
@@ -410,7 +412,7 @@ class TestFacade(unittest.TestCase):
         self.mocks['nmosnode.facade.Proxy'].return_value.control_register.assert_not_called()
 
     def test_reregister_all_bails_if_failed_to_register(self):
-        address="ipc:///tmp/nmos-nodefacade.dummy.for.test"
+        address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"
         srv_type = "dummy_type"
         UUT = Facade(srv_type, address=address)
 
@@ -431,7 +433,7 @@ class TestFacade(unittest.TestCase):
         self.mocks['nmosnode.facade.Proxy'].return_value.control_register.assert_not_called()
 
     def test_reregister_all_bails_when_res_register_raises(self):
-        address="ipc:///tmp/nmos-nodefacade.dummy.for.test"
+        address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"
         srv_type = "dummy_type"
         UUT = Facade(srv_type, address=address)
 
@@ -441,17 +443,16 @@ class TestFacade(unittest.TestCase):
         proxy_path = "http://dummyproxy.example.com"
         UUT.register_service(href, proxy_path)
 
-        resources = [ ("type0", "key0", "val0"),
-                      ("type0", "key1", "val1"),
-                      ("type2", "key2", "val2") ]
-        controls = [ ("id0", { "href" : "href0" }),
-                         ("id1", { "href" : "href1" }),
-                         ("id2", { "href" : "href2" }),
-                         ]
+        resources = [("type0", "key0", "val0"),
+                     ("type0", "key1", "val1"),
+                     ("type2", "key2", "val2")]
+        controls = [("id0", {"href": "href0"}),
+                    ("id1", {"href": "href1"}),
+                    ("id2", {"href": "href2"})]
 
         for res in resources:
             UUT.addResource(*res)
-        UUT.addResource("receiver", "rkey", {"pipel_id" : "DUMMY0", "pipeline_id" : "DUMMY1", "dummy" : "DUMMY2" } )
+        UUT.addResource("receiver", "rkey", {"pipel_id": "DUMMY0", "pipeline_id": "DUMMY1", "dummy": "DUMMY2"})
 
         for con in controls:
             UUT.addControl(*con)
@@ -461,7 +462,7 @@ class TestFacade(unittest.TestCase):
 
         UUT.ipc.res_register.side_effect = Exception
 
-        with mock.patch('gevent.sleep') as sleep:
+        with mock.patch('gevent.sleep'):
             UUT.reregister_all()
 
         self.assertIsNone(UUT.ipc)
@@ -469,7 +470,7 @@ class TestFacade(unittest.TestCase):
         self.assertEqual(len(self.mocks['nmosnode.facade.Proxy'].return_value.control_register.mock_calls), 0)
 
     def test_reregister_all_bails_when_control_register_raises(self):
-        address="ipc:///tmp/nmos-nodefacade.dummy.for.test"
+        address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"
         srv_type = "dummy_type"
         UUT = Facade(srv_type, address=address)
 
@@ -479,19 +480,18 @@ class TestFacade(unittest.TestCase):
         proxy_path = "http://dummyproxy.example.com"
         UUT.register_service(href, proxy_path)
 
-        resources = [ ("type0", "key0", "val0"),
-                      ("type0", "key1", "val1"),
-                      ("type2", "key2", "val2") ]
-        controls = [ ("id0", { "href" : "href0" }),
-                         ("id1", { "href" : "href1" }),
-                         ("id2", { "href" : "href2" }),
-                         ]
+        resources = [("type0", "key0", "val0"),
+                     ("type0", "key1", "val1"),
+                     ("type2", "key2", "val2")]
+        controls = [("id0", {"href": "href0"}),
+                    ("id1", {"href": "href1"}),
+                    ("id2", {"href": "href2"})]
 
         for res in resources:
             UUT.addResource(*res)
-        UUT.addResource("receiver", "rkey", {"pipel_id" : "DUMMY0", "pipeline_id" : "DUMMY1", "dummy" : "DUMMY2" } )
+        UUT.addResource("receiver", "rkey", {"pipel_id": "DUMMY0", "pipeline_id": "DUMMY1", "dummy": "DUMMY2"})
 
-        expected_res_register_calls = [ mock.call(srv_type, mock.ANY, *res) for res in resources ] + [ mock.call(srv_type, mock.ANY, "receiver", "rkey", { "dummy" : "DUMMY2" }), ]
+        expected_res_register_calls = [mock.call(srv_type, mock.ANY, *res) for res in resources] + [mock.call(srv_type, mock.ANY, "receiver", "rkey", {"dummy": "DUMMY2"})]
 
         for con in controls:
             UUT.addControl(*con)
@@ -501,7 +501,7 @@ class TestFacade(unittest.TestCase):
 
         UUT.ipc.control_register.side_effect = Exception
 
-        with mock.patch('gevent.sleep') as sleep:
+        with mock.patch('gevent.sleep'):
             UUT.reregister_all()
 
         self.assertIsNone(UUT.ipc)

@@ -1,6 +1,6 @@
 #!/usr/bin/python
 #
-# Copyright 2017 British Broadcasting Corporation
+# Copyright 2019 British Broadcasting Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import os
 
 # Basic metadata
 name = "nodefacade"
-version = "0.10.6"
+version = "0.10.7"
 description = "BBC implementation of an AMWA NMOS Node API"
 url = "https://github.com/bbc/nmos-node"
 author = "Peter Brightwell"
