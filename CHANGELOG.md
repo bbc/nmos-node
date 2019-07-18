@@ -1,7 +1,10 @@
 # NMOS Node API Implementation Changelog
 
-## 0.10.7
+## 0.10.8
 - Add exponential backoff when registration APIs return 500 responses
+
+## 0.10.7
+- Test code refactor
 
 ## 0.10.6
 - Fix bug with python 3 list iterators
