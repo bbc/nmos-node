@@ -258,7 +258,6 @@ class TestAggregator(unittest.TestCase):
                     a._mdns_updater.inc_P2P_enable_count.assert_not_called()
                     self.mocks['gevent.spawn'].assert_called_with(a._backoff_timer_thread)
 
-
     def test_heartbeat_with_other_exception(self):
         """If an unknown exception is raised during the heartbeat process then the object should reset to unregistered
         state but not increment the P2P enable counter."""
@@ -937,29 +936,6 @@ class TestAggregator(unittest.TestCase):
         def return_list(*args, **kwargs):
             return copy.copy(aggregator_urls_queue)
 
-        def create_mock_request(method, url, aggregator_url, expected_data, headers, prefer_ipv6=False):
-            if not prefer_ipv6:
-                return (mock.call(
-                    method,
-                    urljoin(
-                        aggregator_url,
-                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url
-                    ),
-                    data=expected_data,
-                    headers=headers,
-                    timeout=1.0))
-            else:
-                return (mock.call(
-                    method,
-                    urljoin(
-                        aggregator_url,
-                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url
-                    ),
-                    data=expected_data,
-                    headers=headers,
-                    timeout=1.0,
-                    proxies={'http': ''}))
-
         a = Aggregator(mdns_updater=mock.MagicMock())
         a.mdnsbridge.getHrefList.side_effect = return_list
         a.aggregator = initial_aggregator
@@ -1202,6 +1178,7 @@ class TestAggregator(unittest.TestCase):
         TEST_CONTENT = {
             "foo": "bar",
             "baz": ["potato", "sundae"]}
+
         class scoper:
             num_calls = 0
         def request(*args, **kwargs):
@@ -1306,6 +1283,7 @@ class TestAggregator(unittest.TestCase):
         TEST_CONTENT = {
             "foo": "bar",
             "baz": ["potato", "sundae"]}
+
         class scoper:
             num_calls = 0
         def request(*args, **kwargs):

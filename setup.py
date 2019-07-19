@@ -65,7 +65,7 @@ packages_required = [
     "nmoscommon",
     "requests",
     "gevent",
-    "mdnsbridge>=0.7.4"
+    "mdnsbridge>=0.8.1"
 ]
 
 deps_required = []
