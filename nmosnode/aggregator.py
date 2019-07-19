@@ -151,10 +151,9 @@ class Aggregator(object):
     def _backoff_timer_thread(self):
         backoff_timeout = BACKOFF_INITIAL_TIMOUT_SECONDS
         self._backoff_active = True
-        self._registered["registered"] = False
         self.logger.writeDebug("Backoff thread started")
 
-        while True:
+        while self._backoff_active:
             self.logger.writeDebug("Backoff timer enabled for {} seconds".format(backoff_timeout))
             gevent.sleep(backoff_timeout)
 
@@ -298,12 +297,14 @@ class Aggregator(object):
         except (EndOfAggregatorList, TooManyRetries) as e:
             self.logger.writeWarning("End of Aggregator list while deleting: {}"
                                      .format(e))
+            self._registered["registered"] = False
             if not self._backoff_active:
                 # Start backoff timer to allow aggregator time to recover
                 gevent.spawn(self._backoff_timer_thread)
             return
         except Exception as ex:
             # Server error is bad, no point continuing
+            self._backoff_active = False
             self.logger.writeError("Aborting Node re-register! {}".format(ex))
             return
 

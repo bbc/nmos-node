@@ -54,11 +54,11 @@ class TestAggregator(unittest.TestCase):
                 print(t + ": " + msg)
             return _inner
 
-#        self.mocks['nmosnode.aggregator.Logger'].return_value.writeInfo.side_effect = printmsg("INFO")
-#        self.mocks['nmosnode.aggregator.Logger'].return_value.writeWarning.side_effect = printmsg("WARNING")
-        self.mocks['nmosnode.aggregator.Logger'].return_value.writeDebug.side_effect = printmsg("DEBUG")
-#        self.mocks['nmosnode.aggregator.Logger'].return_value.writeError.side_effect = printmsg("ERROR")
-#        self.mocks['nmosnode.aggregator.Logger'].return_value.writeFatal.side_effect = printmsg("FATAL")
+        # self.mocks['nmosnode.aggregator.Logger'].return_value.writeInfo.side_effect = printmsg("INFO")
+        # self.mocks['nmosnode.aggregator.Logger'].return_value.writeWarning.side_effect = printmsg("WARNING")
+        # self.mocks['nmosnode.aggregator.Logger'].return_value.writeDebug.side_effect = printmsg("DEBUG")
+        # self.mocks['nmosnode.aggregator.Logger'].return_value.writeError.side_effect = printmsg("ERROR")
+        # self.mocks['nmosnode.aggregator.Logger'].return_value.writeFatal.side_effect = printmsg("FATAL")
 
     def test_init(self):
         """Test a call to Aggregator()"""
@@ -654,7 +654,7 @@ class TestAggregator(unittest.TestCase):
     def test_backoff_thread_timout_after_multiple_failures(self):
         """Check that the timeout thread, sets and un-sets the backoff flag after multiple timeouts"""
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a._registered["registered"] = False
+        a._registered["registered"] = True
 
         expected_calls = []
         for x in range(0, 7):
