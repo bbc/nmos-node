@@ -65,6 +65,7 @@ FQDN = getfqdn()
 # mixed = Use HTTP in all URLs, but additionally advertise an HTTPS endpoint for discovery of this API only
 HTTPS_MODE = _config.get('https_mode', 'disabled')
 ENABLE_P2P = _config.get('node_p2p_enable', True)
+OAUTH_MODE = _config.get('oauth_mode', False)
 
 
 def updateHost():
@@ -99,30 +100,43 @@ class NodeFacadeService:
         self.registry_cleaner = None
         self.node_id = None
         self.mdns = MDNSEngine()
-        self.mappings = {"device": "ver_dvc",
-                                   "flow": "ver_flw",
-                                   "source": "ver_src",
-                                   "sender": "ver_snd",
-                                   "receiver": "ver_rcv",
-                                   "self": "ver_slf"}
+        self.mappings = {
+            "device": "ver_dvc",
+            "flow": "ver_flw",
+            "source": "ver_src",
+            "sender": "ver_snd",
+            "receiver": "ver_rcv",
+            "self": "ver_slf"
+        }
         self.mdns_updater = None
         if HTTPS_MODE == "enabled" and ENABLE_P2P:
-            self.mdns_updater = MDNSUpdater(self.mdns,
-                                            DNS_SD_TYPE,
-                                            DNS_SD_NAME,
-                                            self.mappings,
-                                            DNS_SD_HTTPS_PORT,
-                                            self.logger,
-                                            txt_recs={"api_ver": ",".join(NODE_APIVERSIONS), "api_proto": "https"})
+            self.mdns_updater = MDNSUpdater(
+                self.mdns,
+                DNS_SD_TYPE,
+                DNS_SD_NAME,
+                self.mappings,
+                DNS_SD_HTTPS_PORT,
+                self.logger,
+                txt_recs=self._mdns_txt(NODE_APIVERSIONS, "https", OAUTH_MODE)
+            )
         elif ENABLE_P2P:
-            self.mdns_updater = MDNSUpdater(self.mdns,
-                                            DNS_SD_TYPE,
-                                            DNS_SD_NAME,
-                                            self.mappings,
-                                            DNS_SD_HTTP_PORT,
-                                            self.logger,
-                                            txt_recs={"api_ver": ",".join(NODE_APIVERSIONS), "api_proto": "http"})
+            self.mdns_updater = MDNSUpdater(
+                self.mdns,
+                DNS_SD_TYPE,
+                DNS_SD_NAME,
+                self.mappings,
+                DNS_SD_HTTP_PORT,
+                self.logger,
+                txt_recs=self._mdns_txt(NODE_APIVERSIONS, "http", OAUTH_MODE)
+            )
         self.aggregator = Aggregator(self.logger, self.mdns_updater)
+
+    def _mdns_txt(self, versions, protocol, oauth_mode):
+        return {
+            "api_ver": ",".join(versions),
+            "api_proto": protocol,
+            "api_auth": str(oauth_mode).lower()
+        }
 
     def sig_handler(self):
         print('Pressed ctrl+c')
@@ -143,13 +157,15 @@ class NodeFacadeService:
             endpoints.append({
                 "host": HOST,
                 "port": DNS_SD_HTTP_PORT,  # Everything should go via apache proxy
-                "protocol": "http"
+                "protocol": "http",
+                "authorization": OAUTH_MODE
             })
         if HTTPS_MODE != "disabled":
             endpoints.append({
                 "host": HOST,
                 "port": DNS_SD_HTTPS_PORT,  # Everything should go via apache proxy
-                "protocol": "https"
+                "protocol": "https",
+                "authorization": OAUTH_MODE
             })
         return endpoints
 

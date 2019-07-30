@@ -55,7 +55,7 @@ class Facade(object):
             except Exception:
                 self.ipc = None
 
-    def register_service(self, href, proxy_path):
+    def register_service(self, href, proxy_path, authorization=False):
         self.logger.writeInfo("Register service")
         self.href = href
         self.proxy_path = proxy_path
@@ -65,7 +65,7 @@ class Facade(object):
             return
         try:
             with self.lock:
-                s = self.ipc.srv_register(self.srv_type, self.srv_type_urn, self.pid, href, proxy_path)
+                s = self.ipc.srv_register(self.srv_type, self.srv_type_urn, self.pid, href, proxy_path, authorization)
                 if s == FAC_SUCCESS:
                     self.srv_registered = True
                 else:

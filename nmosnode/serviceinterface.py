@@ -54,9 +54,9 @@ class FacadeInterface(object):
         self.host.stop()
 
     @ipcmethod
-    def srv_register(self, name, srv_type, pid, href, proxy_path):
+    def srv_register(self, name, srv_type, pid, href, proxy_path, authorization=False):
         self.logger.writeInfo("Service Register {}, {}, {}, {}, {}".format(name, srv_type, pid, href, proxy_path))
-        return self.registry.register_service(name, srv_type, pid, href, proxy_path)
+        return self.registry.register_service(name, srv_type, pid, href, proxy_path, authorization)
 
     # TODO: =None should be removed once proxying removed from node facade
     @ipcmethod

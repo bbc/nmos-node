@@ -81,7 +81,9 @@ class TestFacade(unittest.TestCase):
         UUT.register_service(href, proxy_path)
 
         self.assertIsNotNone(UUT.ipc)
-        UUT.ipc.srv_register.assert_called_once_with(srv_type, "urn:x-ipstudio:service:" + srv_type, mock.ANY, href, proxy_path)
+        UUT.ipc.srv_register.assert_called_once_with(
+            srv_type, "urn:x-ipstudio:service:" + srv_type, mock.ANY, href, proxy_path, False
+        )
         self.assertTrue(UUT.srv_registered)
 
     def test_register_service_bails_when_no_ipc(self):
@@ -110,7 +112,9 @@ class TestFacade(unittest.TestCase):
         UUT.register_service(href, proxy_path)
 
         self.assertIsNotNone(UUT.ipc)
-        UUT.ipc.srv_register.assert_called_once_with(srv_type, "urn:x-ipstudio:service:" + srv_type, mock.ANY, href, proxy_path)
+        UUT.ipc.srv_register.assert_called_once_with(
+            srv_type, "urn:x-ipstudio:service:" + srv_type, mock.ANY, href, proxy_path, False
+        )
         self.assertFalse(UUT.srv_registered)
 
     def test_register_service_bails_when_register_raises(self):
@@ -125,7 +129,9 @@ class TestFacade(unittest.TestCase):
         UUT.register_service(href, proxy_path)
 
         self.assertIsNone(UUT.ipc)
-        self.mocks['nmosnode.facade.Proxy'].return_value.srv_register.assert_called_once_with(srv_type, "urn:x-ipstudio:service:" + srv_type, mock.ANY, href, proxy_path)
+        self.mocks['nmosnode.facade.Proxy'].return_value.srv_register.assert_called_once_with(
+            srv_type, "urn:x-ipstudio:service:" + srv_type, mock.ANY, href, proxy_path, False
+        )
         self.assertFalse(UUT.srv_registered)
 
     def test_unregister_service(self):
@@ -341,7 +347,7 @@ class TestFacade(unittest.TestCase):
         self.assert_method_calls_remote_method_or_bails('get_node_self', 'self_get', ("v1.1",), raises=True)
 
     def test_debug_message(self):
-        """There's not a lot we can sensibly check here, but we might as well check that every error has a message 
+        """There's not a lot we can sensibly check here, but we might as well check that every error has a message
         and that no two errors have the same message"""
         codes = [name for name in dir() if name.startswith('FAC_') ]
         address = "ipc:///tmp/nmos-nodefacade.dummy.for.test"

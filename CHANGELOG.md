@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.10.8
+- Add `api_auth` text record to mDNS announcements
+
 ## 0.10.7
 - Test code refactor
 
