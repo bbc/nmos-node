@@ -12,25 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import gevent
 from gevent import monkey
 monkey.patch_all()
+from gevent import sleep, queue, spawn  # noqa E402
 
 from six import itervalues # noqa E402
 from six.moves.urllib.parse import urljoin # noqa E402
-
 import requests # noqa E402
 import json # noqa E402
 import time # noqa E402
-
-import gevent.queue # noqa E402
+import traceback # noqa E402
 
 from nmoscommon.logger import Logger # noqa E402
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge # noqa E402
 from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException # noqa E402
-
 from nmoscommon.nmoscommonconfig import config as _config # noqa E402
-import traceback # noqa E402
+from .auth_client import AuthRegistrar, AuthRequestor
 
 AGGREGATOR_APIVERSION = _config.get('nodefacade').get('NODE_REGVERSION')
 AGGREGATOR_APINAMESPACE = "x-nmos"
@@ -38,6 +35,8 @@ AGGREGATOR_APINAME = "registration"
 
 LEGACY_REG_MDNSTYPE = "nmos-registration"
 REGISTRATION_MDNSTYPE = "nmos-register"
+
+OAUTH_MODE = _config.get("oauth_mode", False)
 
 
 class NoAggregator(Exception):
@@ -77,19 +76,24 @@ class Aggregator(object):
         self._registered = {
             'node': None,
             'registered': False,
+            'oauth_client_registered': False,
             'entities': {
                 'resource': {
                 }
             }
         }
-        self._running = True
-        self._reg_queue = gevent.queue.Queue()
-        self.heartbeat_thread = gevent.spawn(self._heartbeat)
-        self.queue_thread = gevent.spawn(self._process_queue)
+        self.auth_registrar = None
+        self.auth_requestor = None
+        self.bearer_token = None
 
-    # The heartbeat thread runs in the background every five seconds.
-    # If when it runs the Node is believed to be registered it will perform a heartbeat
+        self._running = True
+        self._reg_queue = queue.Queue()
+        self.heartbeat_thread = spawn(self._heartbeat)
+        self.queue_thread = spawn(self._process_queue)
+
     def _heartbeat(self):
+        """The heartbeat thread runs in the background every five seconds.
+        If when it runs the Node is believed to be registered it will perform a heartbeat"""
         self.logger.writeDebug("Starting heartbeat thread")
         while self._running:
             heartbeat_wait = 5
@@ -123,19 +127,19 @@ class Aggregator(object):
                 if(self._mdns_updater is not None):
                     self._mdns_updater.inc_P2P_enable_count()
             while heartbeat_wait > 0 and self._running:
-                gevent.sleep(1)
+                sleep(1)
                 heartbeat_wait -= 1
         self.logger.writeDebug("Stopping heartbeat thread")
 
-    # Provided the Node is believed to be correctly registered, hand off a single request to the SEND method
-    # On client error, clear the resource from the local mirror
-    # On other error, mark Node as unregistered and trigger re-registration
     def _process_queue(self):
+        """Provided the Node is believed to be correctly registered, hand off a single request to the SEND method.
+        On client error, clear the resource from the local mirror.
+        On other error, mark Node as unregistered and trigger re-registration"""
         self.logger.writeDebug("Starting HTTP queue processing thread")
         # Checks queue not empty before quitting to make sure unregister node gets done
         while self._running or (self._registered["registered"] and not self._reg_queue.empty()):
             if not self._registered["registered"] or self._reg_queue.empty():
-                gevent.sleep(1)
+                sleep(1)
             else:
                 try:
                     queue_item = self._reg_queue.get()
@@ -182,22 +186,22 @@ class Aggregator(object):
                         self._mdns_updater.P2P_disable()
         self.logger.writeDebug("Stopping HTTP queue processing thread")
 
-    # Queue a request to be processed.
-    # Handles all requests except initial Node POST which is done in _process_reregister
     def _queue_request(self, method, namespace, res_type, key):
+        """Queue a request to be processed. Handles all requests except initial Node POST which is done in
+        _process_reregister"""
         self._reg_queue.put({"method": method, "namespace": namespace, "res_type": res_type, "key": key})
 
-    # Register 'resource' type data including the Node
-    # NB: Node registration is managed by heartbeat thread so may take up to 5 seconds!
     def register(self, res_type, key, **kwargs):
+        """Register 'resource' type data including the Node
+        NB: Node registration is managed by heartbeat thread so may take up to 5 seconds"""
         self.register_into("resource", res_type, key, **kwargs)
 
-    # Unregister 'resource' type data including the Node
     def unregister(self, res_type, key):
+        """Unregister 'resource' type data including the Node"""
         self.unregister_from("resource", res_type, key)
 
-    # General register method for 'resource' types
     def register_into(self, namespace, res_type, key, **kwargs):
+        """General register method for 'resource' types"""
         data = kwargs
         send_obj = {"type": res_type, "data": data}
         if 'id' not in send_obj["data"]:
@@ -207,13 +211,15 @@ class Aggregator(object):
         if namespace == "resource" and res_type == "node":
             # Handle special Node type
             self._registered["node"] = send_obj
+            # Register with Auth server as Auth client
+            self.register_oauth(send_obj)
         else:
             self._add_mirror_keys(namespace, res_type)
             self._registered["entities"][namespace][res_type][key] = send_obj
         self._queue_request("POST", namespace, res_type, key)
 
-    # General unregister method for 'resource' types
     def unregister_from(self, namespace, res_type, key):
+        """General unregister method for 'resource' types"""
         if namespace == "resource" and res_type == "node":
             # Handle special Node type
             self._registered["node"] = None
@@ -223,15 +229,15 @@ class Aggregator(object):
                 del self._registered["entities"][namespace][res_type][key]
         self._queue_request("DELETE", namespace, res_type, key)
 
-    # Deal with missing keys in local mirror
     def _add_mirror_keys(self, namespace, res_type):
+        """Deal with missing keys in local mirror"""
         if namespace not in self._registered["entities"]:
             self._registered["entities"][namespace] = {}
         if res_type not in self._registered["entities"][namespace]:
             self._registered["entities"][namespace][res_type] = {}
 
-    # Re-register just the Node, and queue requests in order for other resources
     def _process_reregister(self):
+        """Re-register just the Node, and queue requests in order for other resources"""
         if self._registered.get("node", None) is None:
             self.logger.writeDebug("No node registered, re-register returning")
             return
@@ -255,7 +261,7 @@ class Aggregator(object):
         while not self._reg_queue.empty():
             try:
                 self._reg_queue.get(block=False)
-            except gevent.queue.Queue.Empty:
+            except queue.Queue.Empty:
                 break
 
         try:
@@ -317,15 +323,63 @@ class Aggregator(object):
             api_href = self.mdnsbridge.getHref(LEGACY_REG_MDNSTYPE, None, AGGREGATOR_APIVERSION, protocol)
         return api_href
 
-    # Handle sending all requests to the Registration API, and searching for a new 'aggregator' if one fails
+    def register_oauth(self, send_object):
+        """Function for Registering OAuth client and requesting token"""
+        if OAUTH_MODE is True and self.auth_registrar is None:
+            self.auth_registrar = self._oauth_register(
+                client_name=send_object['data']['description'],
+                client_uri=send_object['data']['href']
+            )
+        if self._registered['oauth_client_registered']:
+            self.auth_requestor = AuthRequestor(self.auth_registrar, logger=self.logger)
+
+    def _oauth_register(self, client_name, client_uri):
+        """Register OAuth client with Authorization Server"""
+        auth_registrar = AuthRegistrar(
+            client_name=client_name,
+            client_uri=client_uri,
+            allowed_scope="is04",
+            redirect_uri=client_uri,
+            allowed_grant="password",  # Authlib only accepts grants seperated with newline chars
+            allowed_response="code",
+            auth_method="client_secret_basic",
+            certificate=None,
+            logger=self.logger
+        )
+        if auth_registrar.initialised is True:
+            self._registered['oauth_client_registered'] = True
+            return auth_registrar
+
+    def _auth_header(self, headers=None):
+        """Make request for OAuth2 Bearer Token and add Access Token to request Headers"""
+        if headers is None:
+            headers = {}
+        if self.auth_requestor is None:
+            return headers
+        if self.auth_requestor.validate_token_expiry(self.bearer_token) is False:
+            self.bearer_token = self.auth_requestor.token_request_password(
+                username='dannym',
+                password='password',
+                scope='is04'
+            )
+        if self.bearer_token:
+            headers.update({'authorization': 'Bearer {}'.format(self.bearer_token['access_token'])})
+        return headers
+
     def _SEND(self, method, url, data=None):
+        """Handle sending all requests to the Registration API, and searching for a new 'aggregator' if one fails"""
+
+        headers = {}
+
         if self.aggregator == "":
             self.aggregator = self._get_api_href()
 
-        headers = None
         if data is not None:
             data = json.dumps(data)
-            headers = {"Content-Type": "application/json"}
+            headers.update({"Content-Type": "application/json"})
+
+        if OAUTH_MODE is True:
+            self._auth_header(headers)
 
         url = AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url
         for i in range(0, 3):
@@ -359,7 +413,7 @@ class Aggregator(object):
                 elif R.status_code == 204:
                     return
 
-                elif (R.status_code//100) == 4:
+                elif (R.status_code // 100) == 4:
                     self.logger.writeWarning("{} response from aggregator: {} {}"
                                              .format(R.status_code, method, urljoin(self.aggregator, url)))
                     raise InvalidRequest(R.status_code, self._mdns_updater)
@@ -402,13 +456,13 @@ class MDNSUpdater(object):
         self.mdns.register(self.mdns_name, self.mdns_type, self.port, self.txt_rec_base)
 
         self._running = True
-        self._mdns_update_queue = gevent.queue.Queue()
-        self.mdns_thread = gevent.spawn(self._modify_mdns)
+        self._mdns_update_queue = queue.Queue()
+        self.mdns_thread = spawn(self._modify_mdns)
 
     def _modify_mdns(self):
         while self._running:
             if self._mdns_update_queue.empty():
-                gevent.sleep(0.2)
+                sleep(0.2)
             else:
                 try:
                     txt_recs = self._mdns_update_queue.get()
@@ -434,7 +488,7 @@ class MDNSUpdater(object):
                 self._mdns_update_queue.put(self._p2p_txt_recs())
 
     def _increment_service_version(self, type):
-        self.service_versions[self.mappings[type]] = self.service_versions[self.mappings[type]]+1
+        self.service_versions[self.mappings[type]] = self.service_versions[self.mappings[type]] + 1
         if self.service_versions[self.mappings[type]] > 255:
             self.service_versions[self.mappings[type]] = 0
 
