@@ -217,11 +217,15 @@ def legalise_resource(res, rtype, api_version):
                     retval["subscription"].pop("active", None)
         if api_version == "v1.3":
             if rtype == "node":
-                retval["interfaces"].pop("attached_network_device", None)
-                retval["api"]["endpoints"].pop("authorization", None)
-                retval["services"].pop("authorization", None)
+                for interface in retval["interfaces"]:
+                    interface.pop("attached_network_device", None)
+                for endpoint in retval["api"]["endpoints"]:
+                    endpoint.pop("authorization", None)
+                for service in retval["services"]:
+                    service.pop("authorization", None)
             if rtype == "device":
-                retval["controls"].pop("authorization", None)
+                for control in retval["controls"]:
+                    control.pop("authorization", None)
 
     return retval
 
