@@ -189,6 +189,15 @@ def legalise_resource(res, rtype, api_version):
                                        ["interface_bindings"])
     # v1.2 ends
 
+    # v1.3 begins
+    legalkeys[("node", "v1.3")] = (legalkeys[("node", "v1.2")])
+    legalkeys[("device", "v1.3")] = (legalkeys[("device", "v1.2")])
+    legalkeys[("source", "v1.3")] = (legalkeys[("source", "v1.2")] + ["event_type"])
+    legalkeys[("flow", "v1.3")] = (legalkeys[("flow", "v1.2")] + ["event_type"])
+    legalkeys[("sender", "v1.3")] = (legalkeys[("sender", "v1.2")])
+
+    # v1.3 ends
+
     if (rtype, api_version) not in legalkeys:
         return res
 
@@ -206,6 +215,13 @@ def legalise_resource(res, rtype, api_version):
             if api_version in ["v1.0", "v1.1"]:
                 if "subscription" in retval:
                     retval["subscription"].pop("active", None)
+        if api_version == "v1.3":
+            if rtype == "node":
+                retval["interfaces"].pop("attached_network_device", None)
+                retval["api"]["endpoints"].pop("authorization", None)
+                retval["services"].pop("authorization", None)
+            if rtype == "device":
+                retval["controls"].pop("authorization", None)
 
     return retval
 
