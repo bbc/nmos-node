@@ -25,6 +25,7 @@ from nmoscommon.logger import Logger
 from nmoscommon import ptptime
 from nmoscommon.mdns.mdnsExceptions import ServiceAlreadyExistsException
 from nmoscommon.nmoscommonconfig import config as _config
+from nmoscommon.utils import downgrade_api_version
 
 from .api import NODE_REGVERSION
 
@@ -79,155 +80,32 @@ def api_version_less_than(a, b):
 
 
 def legalise_resource(res, rtype, api_version):
-    RESOURCE_CORE_V1_1 = ["id",
-                          "version",
-                          "label",
-                          "description",
-                          "tags"]
-    # v1.0 begins
-    legalkeys = {
-        ("node", "v1.0"): [
-            "id",
-            "version",
-            "label",
-            "href",
-            "hostname",
-            "caps",
-            "services",
-        ],
-        ("device", "v1.0"): [
-            "id",
-            "version",
-            "label",
-            "type",
-            "node_id",
-            "senders",
-            "receivers"
-        ],
-        ("source", "v1.0"): [
-            "id",
-            "label",
-            "description",
-            "format",
-            "caps",
-            "tags",
-            "parents",
-            "version",
-            "device_id",
-        ],
-        ("flow", "v1.0"): [
-            "id",
-            "version",
-            "label",
-            "description",
-            "tags",
-            "format",
-            "tags",
-            "source_id",
-            "parents",
-        ],
-        ("sender", "v1.0"): [
-            "id",
-            "version",
-            "label",
-            "description",
-            "flow_id",
-            "transport",
-            "tags",
-            "device_id",
-            "manifest_href",
-        ],
-        ("receiver", "v1.0"): [
-            "id",
-            "version",
-            "label",
-            "description",
-            "format",
-            "caps",
-            "tags",
-            "device_id",
-            "transport",
-            "subscription"
-        ]
+
+    downgrade_map = {
+        "v1.1": {
+            "node": ["description", "tags", "api", "clocks"],
+            "device": ["description", "tags", "controls"],
+            "source": ["clock_name", "grain_rate", "channels"],
+            "flow": [
+                "device_id", "grain_rate", "media_type", "sample_rate", "bit_depth", "DID_SDID", "frame_width",
+                "frame_height", "interlace_mode", "colorspace", "components", "transfer_characteristic"
+            ],
+        },
+        "v1.2": {
+            "node": ["interfaces"],
+            "sender": ["interface_bindings", "caps", "subscription"],
+            "receiver": ["interface_bindings"]
+        },
+        "v1.3": {
+            "node": ["attached_network_device", "authorization"],
+            "device": ["authorization"],
+            "source": ["event_type"],
+            "flow": ["event_type"],
+        }
     }
-    # v1.0 ends
 
-    # v1.1 begins
-    legalkeys[("node", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                   legalkeys[("node", "v1.0")] +
-                                   ["api", "clocks"])
-    legalkeys[("device", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                     legalkeys[("device", "v1.0")] +
-                                     ["controls"])
-    legalkeys[("source", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                     legalkeys[("source", "v1.0")] +
-                                     ["clock_name", "grain_rate"] +
-                                     ["channels"])
-    legalkeys[("flow", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                   legalkeys[("flow", "v1.0")] +
-                                   ["device_id", "grain_rate", "media_type"] +
-                                   ["sample_rate", "bit_depth"] +
-                                   ["DID_SDID"] +
-                                   ["frame_width", "frame_height",
-                                    "interlace_mode", "colorspace",
-                                    "components", "transfer_characteristic"])
-    legalkeys[("sender", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                     legalkeys[("sender", "v1.0")])
-    legalkeys[("receiver", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                       legalkeys[("receiver", "v1.0")])
-    # v1.1 ends
-
-    # v1.2 begins
-    legalkeys[("node", "v1.2")] = (legalkeys[("node", "v1.1")] +
-                                   ["interfaces"])
-    legalkeys[("device", "v1.2")] = (legalkeys[("device", "v1.1")])
-    legalkeys[("source", "v1.2")] = (legalkeys[("source", "v1.1")])
-    legalkeys[("flow", "v1.2")] = (legalkeys[("flow", "v1.1")])
-    legalkeys[("sender", "v1.2")] = (legalkeys[("sender", "v1.1")] +
-                                     ["interface_bindings", "subscription"])
-    legalkeys[("receiver", "v1.2")] = (legalkeys[("receiver", "v1.1")] +
-                                       ["interface_bindings"])
-    # v1.2 ends
-
-    # v1.3 begins
-    legalkeys[("node", "v1.3")] = (legalkeys[("node", "v1.2")])
-    legalkeys[("device", "v1.3")] = (legalkeys[("device", "v1.2")])
-    legalkeys[("source", "v1.3")] = (legalkeys[("source", "v1.2")] + ["event_type"])
-    legalkeys[("flow", "v1.3")] = (legalkeys[("flow", "v1.2")] + ["event_type"])
-    legalkeys[("sender", "v1.3")] = (legalkeys[("sender", "v1.2")])
-
-    # v1.3 ends
-
-    if (rtype, api_version) not in legalkeys:
-        return res
-
-    retval = dict()
-    for key in legalkeys[(rtype, api_version)]:
-        if key in res:
-            retval[key] = copy.deepcopy(res[key])
-
-        # Catch final items inside objects.
-        # Ideally find a better way long term which uses schemas and as such checks missing keys too
-        if rtype == "receiver":
-            if api_version == "v1.0":
-                if "caps" in retval:
-                    retval["caps"] = {}
-            if api_version in ["v1.0", "v1.1"]:
-                if "subscription" in retval:
-                    retval["subscription"].pop("active", None)
-        if api_version == "v1.3":
-            if rtype == "node":
-                for interface in retval["interfaces"]:
-                    interface.pop("attached_network_device", None)
-                for endpoint in retval["api"]["endpoints"]:
-                    endpoint.pop("authorization", None)
-                for service in retval["services"]:
-                    service.pop("authorization", None)
-            if rtype == "device":
-                for control in retval["controls"]:
-                    control.pop("authorization", None)
-
-    return retval
+    print(downgrade_api_version(res, rtype, api_version, downgrade_map))
+    return downgrade_api_version(res, rtype, api_version, downgrade_map)
 
 
 class FacadeRegistry(object):

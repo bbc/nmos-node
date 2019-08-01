@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.10.9
+- Add api downgrade function from nmoscommon
+
 ## 0.10.8
 - Add `api_auth` text record to mDNS announcements
 

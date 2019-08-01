@@ -158,7 +158,7 @@ class TestRegistry(unittest.TestCase):
     def test_register_calls_aggregator(self):
         """When a resource is registered, the aggregator is informed"""
         self.registry.register_resource("a", 1, "flow", "flow_a_key", {"label": "flow_a"})
-        expected_args = [('resource', 'flow', 'flow_a_key'), {'label': 'flow_a'}]
+        expected_args = [('resource', 'flow', 'flow_a_key'), {'label': 'flow_a', 'max_api_version': 'v1.0'}]
         self.assertEqual(self.mock_aggregator.register_invocations, [expected_args])
 
     def test_register_updates_mdns(self):
