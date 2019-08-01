@@ -104,7 +104,6 @@ def legalise_resource(res, rtype, api_version):
         }
     }
 
-    print(downgrade_api_version(res, rtype, api_version, downgrade_map))
     return downgrade_api_version(res, rtype, api_version, downgrade_map)
 
 
