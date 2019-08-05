@@ -25,7 +25,7 @@ from nmoscommon.logger import Logger
 from nmoscommon import ptptime
 from nmoscommon.mdns.mdnsExceptions import ServiceAlreadyExistsException
 from nmoscommon.nmoscommonconfig import config as _config
-from nmoscommon.utils import downgrade_api_version
+from nmoscommon.utils import downgrade_api_version, api_ver_compare
 
 from .api import NODE_REGVERSION
 
@@ -71,40 +71,6 @@ class FacadeRegistryCleaner(threading.Thread):
     def stop(self):
         self.stopping = True
         self.join()
-
-
-def api_version_less_than(a, b):
-    ver_a = a[1:].split(".")
-    ver_b = b[1:].split(".")
-    return ver_a[0] < ver_b[0] or (ver_a[0] == ver_b[0] and ver_a[1] < ver_b[1])
-
-
-def legalise_resource(res, rtype, api_version):
-
-    downgrade_map = {
-        "v1.1": {
-            "node": ["description", "tags", "api", "clocks"],
-            "device": ["description", "tags", "controls"],
-            "source": ["clock_name", "grain_rate", "channels"],
-            "flow": [
-                "device_id", "grain_rate", "media_type", "sample_rate", "bit_depth", "DID_SDID", "frame_width",
-                "frame_height", "interlace_mode", "colorspace", "components", "transfer_characteristic"
-            ],
-        },
-        "v1.2": {
-            "node": ["interfaces"],
-            "sender": ["interface_bindings", "caps", "subscription"],
-            "receiver": ["interface_bindings"]
-        },
-        "v1.3": {
-            "node": ["attached_network_device", "authorization"],
-            "device": ["authorization"],
-            "source": ["event_type"],
-            "flow": ["event_type"],
-        }
-    }
-
-    return downgrade_api_version(res, rtype, api_version, downgrade_map)
 
 
 class FacadeRegistry(object):
@@ -230,7 +196,7 @@ class FacadeRegistry(object):
                     "Service {}: Registration without valid api version specified".format(service_name)
                 )
                 value["max_api_version"] = "v1.0"
-            elif api_version_less_than(value["max_api_version"], NODE_REGVERSION):
+            elif api_ver_compare(value["max_api_version"], NODE_REGVERSION) < 0:
                 self.logger.writeWarning(
                     "Trying to register resource with api version too low: '{}' : {}".format(key, json.dumps(value))
                 )
@@ -373,14 +339,14 @@ class FacadeRegistry(object):
             if "controls" in value_copy:
                 for control in value_copy["controls"]:
                     control["href"] = self.preprocess_url(control["href"])
-            return legalise_resource(value_copy, type, api_version)
+            return downgrade_api_version(value_copy, type, api_version)
         elif type == "sender":
             value_copy = copy.deepcopy(value)
             if "manifest_href" in value_copy:
                 value_copy["manifest_href"] = self.preprocess_url(value_copy["manifest_href"])
-            return legalise_resource(value_copy, type, api_version)
+            return downgrade_api_version(value_copy, type, api_version)
         else:
-            return legalise_resource(value, type, api_version)
+            return downgrade_api_version(value, type, api_version)
 
     def list_resource(self, type, api_version="v1.0"):
         if type not in self.permitted_resources:
@@ -391,7 +357,7 @@ class FacadeRegistry(object):
                 (k, self.preprocess_resource(type, k, x, api_version))
                 for (k, x) in self.services[name]["resource"][type].items()
                 if (api_version == "v1.0" or (
-                    "max_api_version" in x and not api_version_less_than(x["max_api_version"], api_version)
+                    "max_api_version" in x and api_ver_compare(x["max_api_version"], api_version) >= 0
                 ))
             ]))
         return response

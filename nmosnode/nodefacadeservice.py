@@ -26,10 +26,10 @@ import json # noqa E402
 from six import itervalues # noqa E402
 
 from nmoscommon.httpserver import HttpServer # noqa E402
-from nmoscommon.utils import get_node_id # noqa E402
+from nmoscommon.utils import get_node_id, downgrade_api_version # noqa E402
 from socket import gethostname, getfqdn # noqa E402
 from .api import FacadeAPI # noqa E402
-from .registry import FacadeRegistry, FacadeRegistryCleaner, legalise_resource # noqa E402
+from .registry import FacadeRegistry, FacadeRegistryCleaner # noqa E402
 from .serviceinterface import FacadeInterface # noqa E402
 from os import getpid # noqa E402
 from subprocess import check_output # noqa E402
@@ -264,7 +264,7 @@ class NodeFacadeService:
 
         try:
             self.logger.writeInfo("Registering as {}...".format(self.node_id))
-            self.aggregator.register('node', self.node_id, **legalise_resource(node_data, "node", NODE_REGVERSION))
+            self.aggregator.register('node', self.node_id, **downgrade_api_version(node_data, "node", NODE_REGVERSION))
         except Exception as e:
             self.logger.writeWarning("Could not register: {}".format(e.__repr__()))
 
