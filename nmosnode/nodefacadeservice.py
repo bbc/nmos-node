@@ -109,25 +109,21 @@ class NodeFacadeService:
             "self": "ver_slf"
         }
         self.mdns_updater = None
-        if HTTPS_MODE == "enabled" and ENABLE_P2P:
+        if ENABLE_P2P:
+            if HTTPS_MODE == "enabled":
+                dns_sd_port = DNS_SD_HTTPS_PORT
+                protocol = "https"
+            else:
+                dns_sd_port = DNS_SD_HTTP_PORT
+                protocol = "http"
             self.mdns_updater = MDNSUpdater(
                 self.mdns,
                 DNS_SD_TYPE,
                 DNS_SD_NAME,
                 self.mappings,
-                DNS_SD_HTTPS_PORT,
+                dns_sd_port,
                 self.logger,
-                txt_recs=self._mdns_txt(NODE_APIVERSIONS, "https", OAUTH_MODE)
-            )
-        elif ENABLE_P2P:
-            self.mdns_updater = MDNSUpdater(
-                self.mdns,
-                DNS_SD_TYPE,
-                DNS_SD_NAME,
-                self.mappings,
-                DNS_SD_HTTP_PORT,
-                self.logger,
-                txt_recs=self._mdns_txt(NODE_APIVERSIONS, "http", OAUTH_MODE)
+                txt_recs=self._mdns_txt(NODE_APIVERSIONS, protocol, OAUTH_MODE)
             )
         self.aggregator = Aggregator(self.logger, self.mdns_updater)
 
@@ -146,10 +142,11 @@ class NodeFacadeService:
         if getLocalIP() != "":
             global HOST
             HOST = updateHost()
-            self.registry.modify_node(href=self.generate_href(),
-                                      host=HOST,
-                                      api={"versions": NODE_APIVERSIONS, "endpoints": self.generate_endpoints()},
-                                      interfaces=self.list_interfaces())
+            self.registry.modify_node(
+                href=self.generate_href(),
+                host=HOST,
+                api={"versions": NODE_APIVERSIONS, "endpoints": self.generate_endpoints()},
+                interfaces=self.list_interfaces())
 
     def generate_endpoints(self):
         endpoints = []
@@ -243,12 +240,14 @@ class NodeFacadeService:
             "clocks": [],
             "interfaces": self.list_interfaces()
         }
-        self.registry = FacadeRegistry(self.mappings.keys(),
-                                       self.aggregator,
-                                       self.mdns_updater,
-                                       self.node_id,
-                                       node_data,
-                                       self.logger)
+        self.registry = FacadeRegistry(
+            self.mappings.keys(),
+            self.aggregator,
+            self.mdns_updater,
+            self.node_id,
+            node_data,
+            self.logger
+        )
         self.registry_cleaner = FacadeRegistryCleaner(self.registry)
         self.registry_cleaner.start()
         self.httpServer = HttpServer(FacadeAPI, PORT, '0.0.0.0', api_args=[self.registry])

@@ -14,57 +14,64 @@
 
 import os
 import json
-import time
-import jwt
 import requests
+from flask import session
 from requests.exceptions import HTTPError
 from six.moves.urllib.parse import urljoin
+from authlib.flask.client import OAuth
 
-from ..mdnsbridge import IppmDNSBridge
-from ..logger import Logger
 
-NMOSOAUTH_DIR = '/var/nmosoauth'
-CREDENTIALS_FILE = 'oauth_credentials.json'
-CREDENTIALS_PATH = os.path.join(NMOSOAUTH_DIR, CREDENTIALS_FILE)
+from mdnsbridge.mdnsbridgeclient import IppmDNSBridge
+from nmoscommon.logger import Logger
+
+CREDENTIALS_PATH = os.path.join('/var/nmosauth/', 'oauth_credentials.json')
 
 MDNS_SERVICE_TYPE = "nmos-auth"
 
 API_NAMESPACE = 'x-nmos/auth/v1.0/'
-REGISTRATION_ENDPOINT = API_NAMESPACE + 'register_client'
-TOKEN_ENDPOINT = API_NAMESPACE + 'token'
+REGISTRATION_ENDPOINT = urljoin(API_NAMESPACE, 'register_client')
+AUTHORIZATION_ENDPOINT = urljoin(API_NAMESPACE, 'authorize')
+TOKEN_ENDPOINT = urljoin(API_NAMESPACE, 'token')
+
+TOKEN_KEY = 'token'
+OAUTH = OAuth()  # Set globally to allow for initialisation in api.py
 
 
-def get_credentials_from_file(file):
-    with open(CREDENTIALS_PATH, 'r') as f:
-        credentials = json.load(f)
-    client_id = credentials['client_id']
-    client_secret = credentials['client_secret']
-    return client_id, client_secret
+def get_credentials_from_file(filename=CREDENTIALS_PATH):
+    try:
+        with open(filename, 'r') as f:
+            credentials = json.load(f)
+        client_id = credentials['client_id']
+        client_secret = credentials['client_secret']
+        return client_id, client_secret
+    except OSError as e:
+        print("Could not read OAuth client credentials from file: {}. {}".format(filename, e))
+        raise
 
 
 class AuthRegistrar(object):
     def __init__(self, client_name, redirect_uri, client_uri=None,
                  allowed_scope=None, allowed_grant="authorization_code",
                  allowed_response="code", auth_method="client_secret_basic",
-                 certificate=None, logger=None):
+                 logger=None):
+        self.logger = Logger("auth_registrar", logger)
         self.client_name = client_name
-        self.redirect_uri = redirect_uri
         self.client_uri = client_uri
+        self.redirect_uri = redirect_uri
         self.allowed_scope = allowed_scope
         self.allowed_grant = allowed_grant
         self.allowed_response = allowed_response
         self.auth_method = auth_method
-        self.certificate = certificate  # Could be deployed centrally for an alternative trust mechanism
 
         self.client_id = None
         self.client_secret = None
-        self.logger = Logger("auth_registrar", logger)
         self.bridge = IppmDNSBridge()
         self.initialised = self.initialise()
 
     def initialise(self):
+        """Check if credentials file already exists, meaning the device is already registered.
+        If not, register with Auth Server and write client credentials to file."""
         try:
-            # Check if credentials file already exists i.e. device is already registered
             if os.path.isfile(CREDENTIALS_PATH):
                 self.logger.writeWarning("Credentials file already exists. Using existing credentials.")
                 self.client_id, self.client_secret = get_credentials_from_file(CREDENTIALS_PATH)
@@ -74,17 +81,28 @@ class AuthRegistrar(object):
                 self.write_credentials_to_file(reg_resp_json, CREDENTIALS_PATH)
             return True
         except Exception as e:
-            self.logger.writeError("Unable to initialise OAuth Client with client credentials. {}".format(e))
+            self.logger.writeError(
+                "Unable to initialise OAuth Client with client credentials. {}".format(e)
+            )
             return False
 
     def write_credentials_to_file(self, data, file_path):
-        self.client_id = data.get('client_id')
-        self.client_secret = data.get('client_secret')
-        credentials = {"client_id": self.client_id, "client_secret": self.client_secret}
-        with open(file_path, 'w') as f:
-            json.dump(credentials, f)
-        os.chmod(file_path, 0o600)
-        return True
+        try:
+            self.client_id = data.get('client_id')
+            self.client_secret = data.get('client_secret')
+            credentials = {
+                "client_id": self.client_id,
+                "client_secret": self.client_secret
+            }
+            with open(file_path, 'w') as f:
+                json.dump(credentials, f)
+            os.chmod(file_path, 0o600)
+            return True
+        except OSError as e:
+            self.logger.writeError(
+                "Could not write OAuth client credentials to file {}. {}".format(file_path, e)
+            )
+            raise
 
     def send_oauth_registration_request(self):
         try:
@@ -114,118 +132,71 @@ class AuthRegistrar(object):
             return reg_resp.json()
         except HTTPError as e:
             self.logger.writeError("Unable to Register Client with Auth Server. {}".format(e))
+            self.logger.writeDebug(e.response.text)
             raise
 
 
-class AuthRequestor(object):
+class AuthClient(object):
 
-    def __init__(self, auth_registrar=None, logger=None):
-        self.auth_reg = auth_registrar
-        self.bridge = IppmDNSBridge()
+    def __init__(self, client_name='nmos_node', client_uri=None, logger=None):
         self.logger = Logger("auth_requestor", logger)
+        self.bridge = IppmDNSBridge()
+        self.client_name = client_name
+        self.client_uri = client_uri
+        self.auth_client = OAUTH
+        self.auth_url = self.bridge.getHref(MDNS_SERVICE_TYPE)
+        self.token_url = urljoin(self.auth_url, TOKEN_ENDPOINT)
+        self.refresh_url = urljoin(self.auth_url, TOKEN_ENDPOINT)
+        self.authorize_url = urljoin(self.auth_url, AUTHORIZATION_ENDPOINT)
+        self.client_kwargs = {
+            "scope": "is-04",
+            'token_endpoint_auth_method': 'client_secret_basic'
+        }
+        self.register_client()
 
-    def token_request_password(self, username, password, scope):
-        """Request Token using Password Grant"""
-        return self.token_request(grant_type="password", username=username, password=password, scope=scope)
+    def fetch_local_token(self):
+        return session[TOKEN_KEY]
 
-    def token_request_code(self, code, scope):
-        """Request Token using Authorization Code Grant"""
-        return self.token_request(grant_type="authorization_code", auth_code=code, scope=scope)
+    def update_local_token(token):
+        session[TOKEN_KEY] = token
+        return session[TOKEN_KEY]
 
-    def token_request(self, grant_type, username=None, password=None, auth_code=None, scope=None):
-        """Determine data object to be sent in Token Request"""
+    def register_client(self):
+        client_id, client_secret = get_credentials_from_file(CREDENTIALS_PATH)
+        return self.auth_client.register(
+            name=self.client_name,
+            client_id=client_id,
+            client_secret=client_secret,
+            access_token_url=self.token_url,
+            refresh_token_url=self.refresh_url,
+            authorize_url=self.authorize_url,
+            api_base_url=self.client_uri,
+            client_kwargs=self.client_kwargs,
+            fetch_token=self.fetch_local_token,
+            update_token=self.update_local_token
+        )
 
-        request_data = None
-
-        if grant_type == "password" and username is not None and password is not None:
-            request_data = {
-                "grant_type": grant_type,
-                "username": username,
-                "password": password
-            }
-        elif grant_type == "authorization_code" and auth_code is not None:
-            if self.auth_reg is not None:
-                request_data = {
-                    "grant_type": grant_type,
-                    "code": auth_code,
-                    "redirect_uri": self.auth_reg.redirect_uri,
-                    "client_id": self.auth_reg.client_id
-                }
-            else:
-                client_id, client_secret = get_credentials_from_file(CREDENTIALS_PATH)
-                request_data = {
-                    "grant_type": grant_type,
-                    "code": auth_code,
-                    "redirect_uri": None,
-                    "client_id": client_id
-                }
-        if request_data is None:
-            raise Exception("Invalid Credentials for the supplied Grant Type")
-
-        if scope is not None:
-            request_data.update({'scope': scope})
-
-        return self._auth_request(request_data)
-
-    def validate_token_expiry(self, bearer_token):
-        """Validate if access token has expired and, if so, remove"""
-        if bearer_token is None:
-            return False
-        else:
-            try:
-                access_token = bearer_token.get('access_token')
-                claims_dict = jwt.decode(access_token, verify=False)
-                expiry_time = claims_dict['exp']
-                current_time = int(time.time())
-                if expiry_time > current_time:
-                    return True
-                else:
-                    self.bearer_token = None
-                    return False
-            except Exception as e:
-                self.logger.writeError("Exception reading Token Expiry: {}. Removing Token.".format(e))
-                return False
-
-    def _auth_request(self, data):
-        """Function for Requesting Bearer Token form Auth Server"""
-        try:
-            href = self.bridge.getHref(MDNS_SERVICE_TYPE)
-            if href == '':
-                raise ValueError("No Services Found of type {}".format(MDNS_SERVICE_TYPE))
-            token_href = urljoin(href, TOKEN_ENDPOINT)
-            client_id, client_secret = get_credentials_from_file(CREDENTIALS_PATH)
-
-            # self.logger.writeDebug('Data is: {}. HREF is: {}. ID is: {}. Secret is: {}'.format(
-            #     data, token_href, client_id, client_secret
-            # ))  # Only for Testing
-
-            bearer_token_req = requests.post(
-                token_href,
-                data=data,
-                auth=(client_id, client_secret),
-                timeout=0.5,
-                proxies={'http': ''}
-            )
-            bearer_token_req.raise_for_status()
-            self.logger.writeInfo("Bearer Token Request Successful")
-            return bearer_token_req.json()
-        except Exception as e:
-            self.logger.writeError("Bearer Token Request Failed. {}".format(e))
-            return False
+    def fetch_token(self):
+        node_client = getattr(self.auth_client, self.client_name)
+        # Fetch token from Auth Server using client_credentials grant
+        token = node_client.fetch_access_token(verify=False)
+        return token
 
 
 if __name__ == "__main__":  # pragma: no cover
+
+    client_name = "test_oauth_client"
+    client_uri = "www.example.com"
+
     auth_reg = AuthRegistrar(
-        client_name="test_oauth_client",
-        client_uri="www.example.com",
-        allowed_scope="is04",
+        client_name=client_name,
+        client_uri=client_uri,
+        allowed_scope="is-04",
         redirect_uri="www.app.example.com",
         allowed_grant="password\nauthorization_code",  # Authlib only accepts grants seperated with newline chars
         allowed_response="code",
-        auth_method="client_secret_basic",
-        certificate=None
+        auth_method="client_secret_basic"
     )
     if auth_reg.initialised is True:
-        auth_req = AuthRequestor(auth_reg)
-        token = auth_req.token_request_password(username='dannym', password='password', scope='is04')
-        print('Access Token is: {}'.format(token['access_token']))
+        auth_client = AuthClient(name=client_name, uri=client_uri)
+        print(auth_client.fetch_token())

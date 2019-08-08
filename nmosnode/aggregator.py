@@ -27,7 +27,7 @@ from nmoscommon.logger import Logger # noqa E402
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge # noqa E402
 from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException # noqa E402
 from nmoscommon.nmoscommonconfig import config as _config # noqa E402
-from .auth_client import AuthRegistrar, AuthRequestor
+from .auth_client import AuthRegistrar, AuthClient
 
 AGGREGATOR_APIVERSION = _config.get('nodefacade').get('NODE_REGVERSION')
 AGGREGATOR_APINAMESPACE = "x-nmos"
@@ -76,15 +76,14 @@ class Aggregator(object):
         self._registered = {
             'node': None,
             'registered': False,
-            'oauth_client_registered': False,
+            'auth_client_registered': False,
             'entities': {
                 'resource': {
                 }
             }
         }
         self.auth_registrar = None
-        self.auth_requestor = None
-        self.bearer_token = None
+        self.auth_client = None
 
         self._running = True
         self._reg_queue = queue.Queue()
@@ -212,7 +211,7 @@ class Aggregator(object):
             # Handle special Node type
             self._registered["node"] = send_obj
             # Register with Auth server as Auth client
-            self.register_oauth(send_obj)
+            self.register_auth_client(send_obj)
         else:
             self._add_mirror_keys(namespace, res_type)
             self._registered["entities"][namespace][res_type][key] = send_obj
@@ -323,47 +322,45 @@ class Aggregator(object):
             api_href = self.mdnsbridge.getHref(LEGACY_REG_MDNSTYPE, None, AGGREGATOR_APIVERSION, protocol)
         return api_href
 
-    def register_oauth(self, send_object):
+    def register_auth_client(self, node_object):
         """Function for Registering OAuth client and requesting token"""
-        if OAUTH_MODE is True and self.auth_registrar is None:
-            self.auth_registrar = self._oauth_register(
-                client_name=send_object['data']['description'],
-                client_uri=send_object['data']['href']
-            )
-        if self._registered['oauth_client_registered']:
-            self.auth_requestor = AuthRequestor(self.auth_registrar, logger=self.logger)
+        client_name = node_object['data']['description']
+        client_uri = node_object['data']['href']
 
-    def _oauth_register(self, client_name, client_uri):
+        if OAUTH_MODE is True and self.auth_registrar is None:
+            self.auth_registrar = self._auth_register(
+                client_name=client_name,
+                client_uri=client_uri
+            )
+        if self._registered['auth_client_registered']:
+            self.auth_client = AuthClient(client_name=client_name, client_uri=client_uri, logger=self.logger)
+
+    def _auth_register(self, client_name, client_uri):
         """Register OAuth client with Authorization Server"""
         auth_registrar = AuthRegistrar(
             client_name=client_name,
             client_uri=client_uri,
-            allowed_scope="is04",
+            allowed_scope="is-04",
             redirect_uri=client_uri,
-            allowed_grant="password",  # Authlib only accepts grants seperated with newline chars
+            allowed_grant="client_credentials",
             allowed_response="code",
             auth_method="client_secret_basic",
-            certificate=None,
             logger=self.logger
         )
         if auth_registrar.initialised is True:
-            self._registered['oauth_client_registered'] = True
+            self._registered['auth_client_registered'] = True
             return auth_registrar
 
     def _auth_header(self, headers=None):
         """Make request for OAuth2 Bearer Token and add Access Token to request Headers"""
+        if self.auth_client is None:
+            return headers
         if headers is None:
             headers = {}
-        if self.auth_requestor is None:
-            return headers
-        if self.auth_requestor.validate_token_expiry(self.bearer_token) is False:
-            self.bearer_token = self.auth_requestor.token_request_password(
-                username='dannym',
-                password='password',
-                scope='is04'
-            )
-        if self.bearer_token:
-            headers.update({'authorization': 'Bearer {}'.format(self.bearer_token['access_token'])})
+        if self.auth_client:
+            bearer_token = self.auth_client.fetch_token()
+            if bearer_token:
+                headers.update({'authorization': 'Bearer {}'.format(bearer_token['access_token'])})
         return headers
 
     def _SEND(self, method, url, data=None):

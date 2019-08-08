@@ -22,6 +22,7 @@ import requests
 from socket import gethostname
 
 from nmoscommon.nmoscommonconfig import config as _config
+from .auth_client import OAUTH
 
 NODE_APIVERSIONS = ["v1.0", "v1.1", "v1.2", "v1.3"]
 if _config.get("https_mode", "disabled") == "enabled":
@@ -39,6 +40,7 @@ class FacadeAPI(WebAPI):
         self.registry = registry
         self.node_id = registry.node_id
         super(FacadeAPI, self).__init__()
+        OAUTH.init_app(self.app)
 
     @route('/')
     def root(self):
