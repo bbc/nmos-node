@@ -16,21 +16,20 @@ from gevent import monkey
 monkey.patch_all()
 from gevent import sleep, queue, spawn  # noqa E402
 
-from six import itervalues # noqa E402
-from six.moves.urllib.parse import urljoin # noqa E402
 import requests # noqa E402
 import json # noqa E402
 import time # noqa E402
 import traceback # noqa E402
-from authlib.oauth2.rfc6750 import InvalidTokenError
+from six import itervalues # noqa E402
+from six.moves.urllib.parse import urljoin # noqa E402
+from authlib.oauth2.rfc6750 import InvalidTokenError # noqa E402
 
-from nmoscommon.logger import Logger # noqa E402
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge # noqa E402
+from nmoscommon.logger import Logger # noqa E402
 from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException # noqa E402
 from nmoscommon.nmoscommonconfig import config as _config # noqa E402
 
-from .authclient import AuthRegistrar
-from .authclient import AuthRegistry
+from .authclient import AuthRegistrar, AuthRegistry # noqa E402
 
 auth_registry = AuthRegistry()  # Set globally to allow for initialisation in api.py
 

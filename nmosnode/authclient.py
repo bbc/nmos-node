@@ -154,8 +154,8 @@ class AuthRegistry(OAuth):
     def fetch_local_token(self):
         return self.bearer_token
 
-    # def update_local_token(self, token):
-    #     self.bearer_token = token
+    def update_local_token(self, token):
+        self.bearer_token = token
 
     def register_client(self, client_name, client_uri):
         client_id, client_secret = get_credentials_from_file(CREDENTIALS_PATH)
@@ -170,7 +170,7 @@ class AuthRegistry(OAuth):
             api_base_url=client_uri,
             client_kwargs=self.client_kwargs,
             fetch_token=self.fetch_local_token,
-            # update_token=self.update_local_token
+            update_token=self.update_local_token
         )
 
 
