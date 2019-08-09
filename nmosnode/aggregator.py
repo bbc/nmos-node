@@ -42,6 +42,10 @@ REGISTRATION_MDNSTYPE = "nmos-register"
 
 OAUTH_MODE = _config.get("oauth_mode", False)
 
+NODE_APINAMESPACE = "x-nmos"
+NODE_APINAME = "node"
+NODE_APIROOT = NODE_APINAMESPACE + '/' + NODE_APINAME + '/'
+
 
 class NoAggregator(Exception):
     def __init__(self, mdns_updater=None):
@@ -341,20 +345,26 @@ class Aggregator(object):
                 client_name=client_name,
                 client_uri=client_uri
             )
-        if self._registered['auth_client_registered']:
+        if self._registered['auth_client_registered'] and self.auth_registry is None:
             self.auth_registry = auth_registry
             # Register Node Client
             self.auth_registry.register_client(client_name=client_name, client_uri=client_uri)
             # Extract the 'RemoteApp' class created when registering
             self.auth_client = getattr(self.auth_registry, client_name)
+
+            print("registered redirect_uri: " + self.auth_registrar.redirect_uri)
             self.fetch_auth_token()
 
     def fetch_auth_token(self):
         if self.auth_client is not None and self.auth_registry is not None:
-            # Fetch Token
-            token = self.auth_client.fetch_access_token()
-            # Store token in member variable to be extracted using `fetch_local_token` function
-            self.auth_registry.bearer_token = token
+            if "authorization_code" in self.auth_registrar.allowed_grant:
+                import webbrowser
+                webbrowser.open("http://localhost/x-nmos/node/login")
+            if "client_credentials" in self.auth_registrar.allowed_grant:
+                # Fetch Token
+                token = self.auth_client.fetch_access_token()
+                # Store token in member variable to be extracted using `fetch_local_token` function
+                self.auth_registry.bearer_token = token
 
     def _auth_register(self, client_name, client_uri):
         """Register OAuth client with Authorization Server"""
@@ -362,8 +372,8 @@ class Aggregator(object):
             client_name=client_name,
             client_uri=client_uri,
             allowed_scope="is-04",
-            redirect_uri=client_uri,
-            allowed_grant="client_credentials",
+            redirect_uri='http://localhost/x-nmos/node/authorize',
+            allowed_grant="client_credentials\nauthorization_code",
             allowed_response="code",
             auth_method="client_secret_basic"
         )

@@ -14,7 +14,7 @@
 
 from __future__ import print_function
 
-from flask import request
+from flask import request, url_for, session
 from nmoscommon.webapi import WebAPI, route, resource_route, abort
 from six.moves.urllib.parse import urljoin
 from six import itervalues
@@ -41,6 +41,7 @@ class FacadeAPI(WebAPI):
         self.node_id = registry.node_id
         super(FacadeAPI, self).__init__()
         auth_registry.init_app(self.app)
+        self.app.config["SECRET_KEY"] = "secret"
 
     @route('/')
     def root(self):
@@ -59,6 +60,20 @@ class FacadeAPI(WebAPI):
         if api_version not in NODE_APIVERSIONS:
             abort(404)
         return ["self/", "sources/", "flows/", "devices/", "senders/", "receivers/"]
+
+    @route(NODE_APIROOT + "login", auto_json=False)
+    def login(self):
+        redirect_uri = url_for('_authorization', _external=True)
+        print(redirect_uri)
+        client = getattr(auth_registry, auth_registry.client_name)
+        return client.authorize_redirect(redirect_uri)
+
+    @route(NODE_APIROOT + "authorize")
+    def authorization(self):
+        client = getattr(auth_registry, auth_registry.client_name)
+        token = client.authorize_access_token()
+        auth_registry.bearer_token = token
+        return (client.get(auth_registry.client_uri))
 
     @resource_route(NODE_APIROOT + "<api_version>/<resource_type>/")
     def resource_list(self, api_version, resource_type):

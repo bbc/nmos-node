@@ -127,7 +127,7 @@ class AuthRegistrar(object):
                 proxies={'http': ''}
             )
             reg_resp.raise_for_status()  # Raise error if status !=201
-            self._client_registry[self.client_name] = reg_resp.json()  # Keep a local record of ergistered clients
+            self._client_registry[self.client_name] = reg_resp.json()  # Keep a local record of registered clients
             return reg_resp.json()
         except HTTPError as e:
             logger.writeError("Unable to Register Client with Auth Server. {}".format(e))
@@ -141,6 +141,7 @@ class AuthRegistry(OAuth):
         super(AuthRegistry, self).__init__()
         self.bridge = IppmDNSBridge()
         self.client_name = None
+        self.client_uri = None
         self.bearer_token = None
         self.auth_url = self.bridge.getHref(MDNS_SERVICE_TYPE)
         self.token_url = urljoin(self.auth_url, TOKEN_ENDPOINT)
@@ -160,6 +161,7 @@ class AuthRegistry(OAuth):
     def register_client(self, client_name, client_uri):
         client_id, client_secret = get_credentials_from_file(CREDENTIALS_PATH)
         self.client_name = client_name
+        self.client_uri = client_uri
         return self.register(
             name=client_name,
             client_id=client_id,
