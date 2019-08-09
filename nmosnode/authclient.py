@@ -15,7 +15,6 @@
 import os
 import json
 import requests
-from flask import _app_ctx_stack, current_app
 from requests.exceptions import HTTPError
 from six.moves.urllib.parse import urljoin
 from authlib.flask.client import OAuth

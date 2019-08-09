@@ -22,11 +22,13 @@ import requests # noqa E402
 import json # noqa E402
 import time # noqa E402
 import traceback # noqa E402
+from authlib.oauth2.rfc6750 import InvalidTokenError
 
 from nmoscommon.logger import Logger # noqa E402
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge # noqa E402
 from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException # noqa E402
 from nmoscommon.nmoscommonconfig import config as _config # noqa E402
+
 from .authclient import AuthRegistrar
 from .authclient import AuthRegistry
 
@@ -108,6 +110,10 @@ class Aggregator(object):
                     self.logger.writeDebug("Sending heartbeat for Node {}"
                                            .format(self._registered["node"]["data"]["id"]))
                     self._SEND("POST", "/health/nodes/" + self._registered["node"]["data"]["id"])
+                except InvalidTokenError:
+                    self.logger.writeWarning("Invalid Token. Requesting new Token.")
+                    self.fetch_auth_token()
+                    heartbeat_wait = 0
                 except InvalidRequest as e:
                     if e.status_code == 404:
                         # Re-register
@@ -342,6 +348,10 @@ class Aggregator(object):
             self.auth_registry.register_client(client_name=client_name, client_uri=client_uri)
             # Extract the 'RemoteApp' class created when registering
             self.auth_client = getattr(self.auth_registry, client_name)
+            self.fetch_auth_token()
+
+    def fetch_auth_token(self):
+        if self.auth_client is not None and self.auth_registry is not None:
             # Fetch Token
             token = self.auth_client.fetch_access_token()
             # Store token in member variable to be extracted using `fetch_local_token` function
