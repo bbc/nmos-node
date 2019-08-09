@@ -27,7 +27,10 @@ from nmoscommon.logger import Logger # noqa E402
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge # noqa E402
 from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException # noqa E402
 from nmoscommon.nmoscommonconfig import config as _config # noqa E402
-from .auth_client import AuthRegistrar, AuthClient
+from .authclient import AuthRegistrar
+from .authclient import AuthRegistry
+
+auth_registry = AuthRegistry()  # Set globally to allow for initialisation in api.py
 
 AGGREGATOR_APIVERSION = _config.get('nodefacade').get('NODE_REGVERSION')
 AGGREGATOR_APINAMESPACE = "x-nmos"
@@ -82,8 +85,9 @@ class Aggregator(object):
                 }
             }
         }
-        self.auth_registrar = None
-        self.auth_client = None
+        self.auth_registrar = None  # Class responsible for registering with Auth Server
+        self.auth_registry = None  # Top level class that tracks locally registered OAuth clients
+        self.auth_client = None  # Instance of Oauth client responsible for performing token requests
 
         self._running = True
         self._reg_queue = queue.Queue()
@@ -247,9 +251,9 @@ class Aggregator(object):
         except InvalidRequest as e:
             # 404 etc is ok
             self.logger.writeInfo("Invalid request when deleting Node prior to registration: {}".format(e))
-        except Exception as ex:
+        except Exception as e:
             # Server error is bad, no point continuing
-            self.logger.writeError("Aborting Node re-register! {}".format(ex))
+            self.logger.writeError("Aborting Node re-register! {}".format(e))
             return
 
         self._registered["registered"] = False
@@ -323,7 +327,7 @@ class Aggregator(object):
         return api_href
 
     def register_auth_client(self, node_object):
-        """Function for Registering OAuth client and requesting token"""
+        """Function for Registering OAuth client with Auth Server and instantiating OAuth Client class"""
         client_name = node_object['data']['description']
         client_uri = node_object['data']['href']
 
@@ -333,7 +337,15 @@ class Aggregator(object):
                 client_uri=client_uri
             )
         if self._registered['auth_client_registered']:
-            self.auth_client = AuthClient(client_name=client_name, client_uri=client_uri, logger=self.logger)
+            self.auth_registry = auth_registry
+            # Register Node Client
+            self.auth_registry.register_client(client_name=client_name, client_uri=client_uri)
+            # Extract the 'RemoteApp' class created when registering
+            self.auth_client = getattr(self.auth_registry, client_name)
+            # Fetch Token
+            token = self.auth_client.fetch_access_token()
+            # Store token in member variable to be extracted using `fetch_local_token` function
+            self.auth_registry.bearer_token = token
 
     def _auth_register(self, client_name, client_uri):
         """Register OAuth client with Authorization Server"""
@@ -344,24 +356,11 @@ class Aggregator(object):
             redirect_uri=client_uri,
             allowed_grant="client_credentials",
             allowed_response="code",
-            auth_method="client_secret_basic",
-            logger=self.logger
+            auth_method="client_secret_basic"
         )
         if auth_registrar.initialised is True:
             self._registered['auth_client_registered'] = True
             return auth_registrar
-
-    def _auth_header(self, headers=None):
-        """Make request for OAuth2 Bearer Token and add Access Token to request Headers"""
-        if self.auth_client is None:
-            return headers
-        if headers is None:
-            headers = {}
-        if self.auth_client:
-            bearer_token = self.auth_client.fetch_token()
-            if bearer_token:
-                headers.update({'authorization': 'Bearer {}'.format(bearer_token['access_token'])})
-        return headers
 
     def _SEND(self, method, url, data=None):
         """Handle sending all requests to the Registration API, and searching for a new 'aggregator' if one fails"""
@@ -374,9 +373,6 @@ class Aggregator(object):
         if data is not None:
             data = json.dumps(data)
             headers.update({"Content-Type": "application/json"})
-
-        if OAUTH_MODE is True:
-            self._auth_header(headers)
 
         url = AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url
         for i in range(0, 3):
@@ -392,11 +388,20 @@ class Aggregator(object):
             # to web clients - so, sacrifice a little timeliness for things working as designed the
             # majority of the time...
             try:
-                if _config.get('prefer_ipv6') is False:
-                    R = requests.request(method, urljoin(self.aggregator, url), data=data, timeout=1.0, headers=headers)
+                kwargs = {
+                    "method": method, "url": urljoin(self.aggregator, url),
+                    "data": data, "timeout": 1.0, "headers": headers
+                }
+                if _config.get('prefer_ipv6') is True:
+                    kwargs["proxies"] = {'http': ''}
+
+                # If not in OAuth mode, perform standard request
+                if OAUTH_MODE is False or self.auth_client is None:
+                    R = requests.request(**kwargs)
                 else:
-                    R = requests.request(method, urljoin(self.aggregator, url), data=data, timeout=1.0,
-                                         headers=headers, proxies={'http': ''})
+                    # If in OAuth Mode, use OAuth client to automatically fetch token / refresh token if expired
+                    with self.auth_registry.app.app_context():
+                        R = self.auth_client.request(**kwargs)
                 if R is None:
                     # Try another aggregator
                     self.logger.writeWarning("No response from aggregator {}".format(self.aggregator))

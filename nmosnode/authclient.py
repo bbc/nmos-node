@@ -15,11 +15,10 @@
 import os
 import json
 import requests
-from flask import session
+from flask import _app_ctx_stack, current_app
 from requests.exceptions import HTTPError
 from six.moves.urllib.parse import urljoin
 from authlib.flask.client import OAuth
-
 
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge
 from nmoscommon.logger import Logger
@@ -34,7 +33,8 @@ AUTHORIZATION_ENDPOINT = urljoin(API_NAMESPACE, 'authorize')
 TOKEN_ENDPOINT = urljoin(API_NAMESPACE, 'token')
 
 TOKEN_KEY = 'token'
-OAUTH = OAuth()  # Set globally to allow for initialisation in api.py
+
+logger = Logger("auth_client", None)
 
 
 def get_credentials_from_file(filename=CREDENTIALS_PATH):
@@ -45,16 +45,14 @@ def get_credentials_from_file(filename=CREDENTIALS_PATH):
         client_secret = credentials['client_secret']
         return client_id, client_secret
     except OSError as e:
-        print("Could not read OAuth client credentials from file: {}. {}".format(filename, e))
+        logger.writeError("Could not read OAuth client credentials from file: {}. {}".format(filename, e))
         raise
 
 
 class AuthRegistrar(object):
     def __init__(self, client_name, redirect_uri, client_uri=None,
                  allowed_scope=None, allowed_grant="authorization_code",
-                 allowed_response="code", auth_method="client_secret_basic",
-                 logger=None):
-        self.logger = Logger("auth_registrar", logger)
+                 allowed_response="code", auth_method="client_secret_basic"):
         self.client_name = client_name
         self.client_uri = client_uri
         self.redirect_uri = redirect_uri
@@ -66,6 +64,7 @@ class AuthRegistrar(object):
         self.client_id = None
         self.client_secret = None
         self.bridge = IppmDNSBridge()
+        self._client_registry = {}
         self.initialised = self.initialise()
 
     def initialise(self):
@@ -73,15 +72,15 @@ class AuthRegistrar(object):
         If not, register with Auth Server and write client credentials to file."""
         try:
             if os.path.isfile(CREDENTIALS_PATH):
-                self.logger.writeWarning("Credentials file already exists. Using existing credentials.")
+                logger.writeWarning("Credentials file already exists. Using existing credentials.")
                 self.client_id, self.client_secret = get_credentials_from_file(CREDENTIALS_PATH)
             else:
-                self.logger.writeInfo("Registering with Authorization Server...")
+                logger.writeInfo("Registering with Authorization Server...")
                 reg_resp_json = self.send_oauth_registration_request()
                 self.write_credentials_to_file(reg_resp_json, CREDENTIALS_PATH)
             return True
         except Exception as e:
-            self.logger.writeError(
+            logger.writeError(
                 "Unable to initialise OAuth Client with client credentials. {}".format(e)
             )
             return False
@@ -99,7 +98,7 @@ class AuthRegistrar(object):
             os.chmod(file_path, 0o600)
             return True
         except OSError as e:
-            self.logger.writeError(
+            logger.writeError(
                 "Could not write OAuth client credentials to file {}. {}".format(file_path, e)
             )
             raise
@@ -108,7 +107,7 @@ class AuthRegistrar(object):
         try:
             href = self.bridge.getHref(MDNS_SERVICE_TYPE)
             registration_href = urljoin(href, REGISTRATION_ENDPOINT)
-            self.logger.writeDebug('Registration endpoint href is: {}'.format(registration_href))
+            logger.writeDebug('Registration endpoint href is: {}'.format(registration_href))
 
             data = {
                 "client_name": self.client_name,
@@ -129,21 +128,21 @@ class AuthRegistrar(object):
                 proxies={'http': ''}
             )
             reg_resp.raise_for_status()  # Raise error if status !=201
+            self._client_registry[self.client_name] = reg_resp.json()  # Keep a local record of ergistered clients
             return reg_resp.json()
         except HTTPError as e:
-            self.logger.writeError("Unable to Register Client with Auth Server. {}".format(e))
-            self.logger.writeDebug(e.response.text)
+            logger.writeError("Unable to Register Client with Auth Server. {}".format(e))
+            logger.writeDebug(e.response.text)
             raise
 
 
-class AuthClient(object):
+class AuthRegistry(OAuth):
 
-    def __init__(self, client_name='nmos_node', client_uri=None, logger=None):
-        self.logger = Logger("auth_requestor", logger)
+    def __init__(self):
+        super(AuthRegistry, self).__init__()
         self.bridge = IppmDNSBridge()
-        self.client_name = client_name
-        self.client_uri = client_uri
-        self.auth_client = OAUTH
+        self.client_name = None
+        self.bearer_token = None
         self.auth_url = self.bridge.getHref(MDNS_SERVICE_TYPE)
         self.token_url = urljoin(self.auth_url, TOKEN_ENDPOINT)
         self.refresh_url = urljoin(self.auth_url, TOKEN_ENDPOINT)
@@ -152,35 +151,28 @@ class AuthClient(object):
             "scope": "is-04",
             'token_endpoint_auth_method': 'client_secret_basic'
         }
-        self.register_client()
 
     def fetch_local_token(self):
-        return session[TOKEN_KEY]
+        return self.bearer_token
 
-    def update_local_token(token):
-        session[TOKEN_KEY] = token
-        return session[TOKEN_KEY]
+    # def update_local_token(self, token):
+    #     self.bearer_token = token
 
-    def register_client(self):
+    def register_client(self, client_name, client_uri):
         client_id, client_secret = get_credentials_from_file(CREDENTIALS_PATH)
-        return self.auth_client.register(
-            name=self.client_name,
+        self.client_name = client_name
+        return self.register(
+            name=client_name,
             client_id=client_id,
             client_secret=client_secret,
             access_token_url=self.token_url,
             refresh_token_url=self.refresh_url,
             authorize_url=self.authorize_url,
-            api_base_url=self.client_uri,
+            api_base_url=client_uri,
             client_kwargs=self.client_kwargs,
             fetch_token=self.fetch_local_token,
-            update_token=self.update_local_token
+            # update_token=self.update_local_token
         )
-
-    def fetch_token(self):
-        node_client = getattr(self.auth_client, self.client_name)
-        # Fetch token from Auth Server using client_credentials grant
-        token = node_client.fetch_access_token(verify=False)
-        return token
 
 
 if __name__ == "__main__":  # pragma: no cover
@@ -198,5 +190,5 @@ if __name__ == "__main__":  # pragma: no cover
         auth_method="client_secret_basic"
     )
     if auth_reg.initialised is True:
-        auth_client = AuthClient(name=client_name, uri=client_uri)
+        auth_client = AuthRegistry(name=client_name, uri=client_uri)
         print(auth_client.fetch_token())
