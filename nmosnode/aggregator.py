@@ -351,8 +351,7 @@ class Aggregator(object):
             self.auth_registry.register_client(client_name=client_name, client_uri=client_uri)
             # Extract the 'RemoteApp' class created when registering
             self.auth_client = getattr(self.auth_registry, client_name)
-
-            print("registered redirect_uri: " + self.auth_registrar.redirect_uri)
+            # Fetch Token
             self.fetch_auth_token()
 
     def fetch_auth_token(self):
@@ -360,7 +359,7 @@ class Aggregator(object):
             if "authorization_code" in self.auth_registrar.allowed_grant:
                 import webbrowser
                 webbrowser.open("http://localhost/x-nmos/node/login")
-            if "client_credentials" in self.auth_registrar.allowed_grant:
+            elif "client_credentials" in self.auth_registrar.allowed_grant:
                 # Fetch Token
                 token = self.auth_client.fetch_access_token()
                 # Store token in member variable to be extracted using `fetch_local_token` function
