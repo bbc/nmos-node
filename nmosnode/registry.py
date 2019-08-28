@@ -25,7 +25,7 @@ from nmoscommon.logger import Logger
 from nmoscommon import ptptime
 from nmoscommon.mdns.mdnsExceptions import ServiceAlreadyExistsException
 from nmoscommon.nmoscommonconfig import config as _config
-from nmoscommon.utils import downgrade_api_version, api_ver_compare
+from nmoscommon.utils import translate_api_version, api_ver_compare
 
 from .api import NODE_REGVERSION
 
@@ -339,14 +339,14 @@ class FacadeRegistry(object):
             if "controls" in value_copy:
                 for control in value_copy["controls"]:
                     control["href"] = self.preprocess_url(control["href"])
-            return downgrade_api_version(value_copy, type, api_version)
+            return translate_api_version(value_copy, type, api_version)
         elif type == "sender":
             value_copy = copy.deepcopy(value)
             if "manifest_href" in value_copy:
                 value_copy["manifest_href"] = self.preprocess_url(value_copy["manifest_href"])
-            return downgrade_api_version(value_copy, type, api_version)
+            return translate_api_version(value_copy, type, api_version)
         else:
-            return downgrade_api_version(value, type, api_version)
+            return translate_api_version(value, type, api_version)
 
     def list_resource(self, type, api_version="v1.0"):
         if type not in self.permitted_resources:
