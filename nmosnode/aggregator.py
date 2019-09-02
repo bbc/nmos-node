@@ -340,7 +340,7 @@ class Aggregator(object):
     def register_auth_client(self, node_object):
         """Function for Registering OAuth client with Auth Server and instantiating OAuth Client class"""
         client_name = node_object['data']['description']
-        client_uri = node_object['data']['href']
+        client_uri = 'http://' + node_object['data']['label']
 
         if OAUTH_MODE is True and self.auth_registrar is None:
             self.auth_registrar = self._auth_register(
