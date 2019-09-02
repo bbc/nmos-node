@@ -19,7 +19,7 @@ from nmoscommon.webapi import WebAPI, route, resource_route, abort
 from six.moves.urllib.parse import urljoin
 from six import itervalues
 import requests
-from socket import gethostname
+from socket import gethostname, getfqdn
 
 from nmoscommon.nmoscommonconfig import config as _config
 from .aggregator import auth_registry
@@ -42,6 +42,7 @@ class FacadeAPI(WebAPI):
         super(FacadeAPI, self).__init__()
         auth_registry.init_app(self.app)
         self.app.config["SECRET_KEY"] = "secret"
+        self.app.config["SERVER_NAME"] = getfqdn()
         self.client = None
 
     @route('/')
@@ -65,6 +66,8 @@ class FacadeAPI(WebAPI):
     @route(NODE_APIROOT + "login", auto_json=False)
     def login(self):
         redirect_uri = url_for('_authorization', _external=True)
+        print(redirect_uri)
+        print(auth_registry.client_uri + 'x-nmos/node/authorize')
         self.client = getattr(auth_registry, auth_registry.client_name)
         return self.client.authorize_redirect(redirect_uri)
 

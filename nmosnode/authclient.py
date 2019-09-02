@@ -22,7 +22,7 @@ from authlib.flask.client import OAuth
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge
 from nmoscommon.logger import Logger
 
-CREDENTIALS_PATH = os.path.join('/home/dannym/', 'oauth_credentials.json')
+CREDENTIALS_PATH = os.path.join('/home/dannym/', 'oauth_credentials.json')  # Change this back after testing
 
 MDNS_SERVICE_TYPE = "nmos-auth"
 

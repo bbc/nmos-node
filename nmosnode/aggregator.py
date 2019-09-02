@@ -20,8 +20,10 @@ import requests # noqa E402
 import json # noqa E402
 import time # noqa E402
 import traceback # noqa E402
+import webbrowser  # noqa E402
 from six import itervalues # noqa E402
 from six.moves.urllib.parse import urljoin # noqa E402
+from socket import getfqdn  # noqa E402
 from authlib.oauth2.rfc6750 import InvalidTokenError # noqa E402
 
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge # noqa E402
@@ -357,8 +359,7 @@ class Aggregator(object):
     def fetch_auth_token(self):
         if self.auth_client is not None and self.auth_registry is not None:
             if "authorization_code" in self.auth_registrar.allowed_grant:
-                import webbrowser
-                webbrowser.open("http://localhost/x-nmos/node/login")
+                webbrowser.open("http://" + getfqdn() + "/x-nmos/node/login")
             elif "client_credentials" in self.auth_registrar.allowed_grant:
                 # Fetch Token
                 token = self.auth_client.fetch_access_token()
@@ -371,7 +372,7 @@ class Aggregator(object):
             client_name=client_name,
             client_uri=client_uri,
             allowed_scope="is-04",
-            redirect_uri='http://localhost/x-nmos/node/authorize',
+            redirect_uri='http://' + getfqdn() + '/x-nmos/node/authorize',
             allowed_grant="client_credentials\nauthorization_code",
             allowed_response="code",
             auth_method="client_secret_basic"
