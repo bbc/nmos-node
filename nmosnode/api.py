@@ -14,6 +14,7 @@
 
 from __future__ import print_function
 
+from os import urandom
 from flask import request, url_for, redirect
 from nmoscommon.webapi import WebAPI, route, resource_route, abort
 from six.moves.urllib.parse import urljoin
@@ -22,7 +23,6 @@ import requests
 from socket import gethostname
 
 from nmoscommon.nmoscommonconfig import config as _config
-from .aggregator import auth_registry
 
 NODE_APIVERSIONS = ["v1.0", "v1.1", "v1.2", "v1.3"]
 if _config.get("https_mode", "disabled") == "enabled":
@@ -36,13 +36,15 @@ RESOURCE_TYPES = ["sources", "flows", "devices", "senders", "receivers"]
 
 
 class FacadeAPI(WebAPI):
-    def __init__(self, registry):
+    def __init__(self, registry, auth_registry=None):
+        super(FacadeAPI, self).__init__()
+        self.app.config["SECRET_KEY"] = urandom(16)  # Required for auth client
         self.registry = registry
         self.node_id = registry.node_id
-        super(FacadeAPI, self).__init__()
-        auth_registry.init_app(self.app)
-        self.app.config["SECRET_KEY"] = "secret"
-        self.client = None
+        self.auth_registry = auth_registry
+        self.auth_client = None
+        if self.auth_registry:
+            self.auth_registry.init_app(self.app)
 
     @route('/')
     def root(self):
@@ -66,20 +68,20 @@ class FacadeAPI(WebAPI):
     def login(self):
         """Redirect to Auth Server for authorization"""
         redirect_uri = url_for('_authorization', _external=True)
-        self.client = getattr(auth_registry, auth_registry.client_name)
-        return self.client.authorize_redirect(redirect_uri)
+        self.auth_client = getattr(self.auth_registry, self.auth_registry.client_name)
+        return self.auth_client.authorize_redirect(redirect_uri)
 
     @route(NODE_APIROOT + "authorize", auto_json=False)
     def authorization(self):
         """Authorize Auth Server redirect and obtain token"""
-        token = self.client.authorize_access_token()
-        auth_registry.bearer_token = token
+        token = self.auth_client.authorize_access_token()
+        self.auth_registry.bearer_token = token
         return redirect(url_for('_query_nodes'))
 
     @route(NODE_APIROOT + 'query_nodes')
     def query_nodes(self):
         """Test endpoint for making request with access token to Node API"""
-        resp = self.client.get(auth_registry.client_uri + '/x-nmos/query/v1.2/nodes/')
+        resp = self.auth_client.get(self.auth_registry.client_uri + '/x-nmos/query/v1.2/nodes/')
         return resp.json()
 
     @resource_route(NODE_APIROOT + "<api_version>/<resource_type>/")

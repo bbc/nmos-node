@@ -25,15 +25,14 @@ from six import itervalues # noqa E402
 from six.moves.urllib.parse import urljoin # noqa E402
 from socket import getfqdn  # noqa E402
 from authlib.oauth2.rfc6750 import InvalidTokenError # noqa E402
+from authlib.oauth2.base import OAuth2Error # noqa E402
 
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge # noqa E402
 from nmoscommon.logger import Logger # noqa E402
 from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException # noqa E402
 from nmoscommon.nmoscommonconfig import config as _config # noqa E402
 
-from .authclient import AuthRegistrar, AuthRegistry # noqa E402
-
-auth_registry = AuthRegistry()  # Set globally to allow for initialisation in api.py
+from .authclient import AuthRegistrar # noqa E402
 
 AGGREGATOR_APIVERSION = _config.get('nodefacade').get('NODE_REGVERSION')
 AGGREGATOR_APINAMESPACE = "x-nmos"
@@ -43,6 +42,8 @@ LEGACY_REG_MDNSTYPE = "nmos-registration"
 REGISTRATION_MDNSTYPE = "nmos-register"
 
 OAUTH_MODE = _config.get("oauth_mode", False)
+ALLOWED_GRANTS = ["authorization_code", "refresh_token", "client_credentials"]
+ALLOWED_SCOPE = "is-04"
 
 NODE_APINAMESPACE = "x-nmos"
 NODE_APINAME = "node"
@@ -75,7 +76,7 @@ class Aggregator(object):
     """This class serves as a proxy for the distant aggregation service running elsewhere on the network.
     It will search out aggregators and locate them, falling back to other ones if the one it is connected to
     disappears, and resending data as needed."""
-    def __init__(self, logger=None, mdns_updater=None):
+    def __init__(self, logger=None, mdns_updater=None, auth_registry=None):
         self.logger = Logger("aggregator_proxy", logger)
         self.mdnsbridge = IppmDNSBridge(logger=self.logger)
         self.aggregator = ""
@@ -93,7 +94,7 @@ class Aggregator(object):
             }
         }
         self.auth_registrar = None  # Class responsible for registering with Auth Server
-        self.auth_registry = None  # Top level class that tracks locally registered OAuth clients
+        self.auth_registry = auth_registry  # Top level class that tracks locally registered OAuth clients
         self.auth_client = None  # Instance of Oauth client responsible for performing token requests
 
         self._running = True
@@ -115,10 +116,6 @@ class Aggregator(object):
                     self.logger.writeDebug("Sending heartbeat for Node {}"
                                            .format(self._registered["node"]["data"]["id"]))
                     self._SEND("POST", "/health/nodes/" + self._registered["node"]["data"]["id"])
-                except InvalidTokenError:
-                    self.logger.writeWarning("Invalid Token. Requesting new Token.")
-                    self.fetch_auth_token()
-                    heartbeat_wait = 0
                 except InvalidRequest as e:
                     if e.status_code == 404:
                         # Re-register
@@ -132,9 +129,11 @@ class Aggregator(object):
                         self.logger.writeError("Unrecoverable error code {} received from Registration API on heartbeat"
                                                .format(e.status_code))
                         self._running = False
-                except Exception:
+                except Exception as e:
                     # Re-register
-                    self.logger.writeWarning("Unexpected error on heartbeat. Marking Node for re-registration")
+                    self.logger.writeWarning(
+                        "Unexpected error on heartbeat: {}. Marking Node for re-registration".format(e)
+                    )
                     self._registered["registered"] = False
             else:
                 self._registered["registered"] = False
@@ -347,35 +346,41 @@ class Aggregator(object):
                 client_name=client_name,
                 client_uri=client_uri
             )
-        if self._registered['auth_client_registered'] and self.auth_registry is None:
-            self.auth_registry = auth_registry
-            # Register Node Client
-            self.auth_registry.register_client(client_name=client_name, client_uri=client_uri)
+        if self._registered['auth_client_registered'] and self.auth_client is None:
+            try:
+                # Register Node Client
+                self.auth_registry.register_client(client_name=client_name, client_uri=client_uri)
+            except OSError:
+                self.logger.writeError("Exception accessing OAuth credentials. Could not register OAuth2 client.")
             # Extract the 'RemoteApp' class created when registering
             self.auth_client = getattr(self.auth_registry, client_name)
             # Fetch Token
             self.fetch_auth_token()
 
     def fetch_auth_token(self):
-        if self.auth_client is not None and self.auth_registry is not None:
-            if "authorization_code" in self.auth_registrar.allowed_grant:
-                webbrowser.open("http://" + getfqdn() + "/x-nmos/node/login")
-            elif "client_credentials" in self.auth_registrar.allowed_grant:
-                # Fetch Token
-                token = self.auth_client.fetch_access_token()
-                # Store token in member variable to be extracted using `fetch_local_token` function
-                self.auth_registry.bearer_token = token
+        if self.auth_client is not None and self.auth_registrar is not None:
+            try:
+                if "authorization_code" in self.auth_registrar.allowed_grant:
+                    # Open browser at endpoint for redirecting to Auth Server's /authorize endpoint
+                    webbrowser.open("http://" + getfqdn() + "/x-nmos/node/login")
+                elif "client_credentials" in self.auth_registrar.allowed_grant:
+                    # Fetch Token
+                    token = self.auth_client.fetch_access_token()
+                    # Store token in member variable to be extracted using `fetch_local_token` function
+                    self.auth_registry.bearer_token = token
+                else:
+                    raise OAuth2Error("Client registered with unsupported Grant Type")
+            except OAuth2Error as e:
+                self.logger.writeError("Failure fetching access token. {}".format(e))
 
     def _auth_register(self, client_name, client_uri):
         """Register OAuth client with Authorization Server"""
         auth_registrar = AuthRegistrar(
             client_name=client_name,
-            client_uri=client_uri,
-            allowed_scope="is-04",
             redirect_uri='http://' + getfqdn() + '/x-nmos/node/authorize',
-            allowed_grant="client_credentials\nauthorization_code",
-            allowed_response="code",
-            auth_method="client_secret_basic"
+            client_uri=client_uri,
+            allowed_scope=ALLOWED_SCOPE,
+            allowed_grant=ALLOWED_GRANTS
         )
         if auth_registrar.initialised is True:
             self._registered['auth_client_registered'] = True
@@ -420,7 +425,17 @@ class Aggregator(object):
                 else:
                     # If in OAuth Mode, use OAuth client to automatically fetch token / refresh token if expired
                     with self.auth_registry.app.app_context():
-                        R = self.auth_client.request(**kwargs)
+                        try:
+                            R = self.auth_client.request(**kwargs)
+                        except InvalidTokenError:
+                            self.logger.writeWarning("Invalid Token. Requesting new Token.")
+                            self.fetch_auth_token()
+                            try:
+                                R = self.auth_client.request(**kwargs)  # Resend the request
+                            except Exception as e:
+                                self.logger.writeError("Error re-requesting token: {}. Removing Auth Client".format(e))
+                                self.auth_client = None
+
                 if R is None:
                     # Try another aggregator
                     self.logger.writeWarning("No response from aggregator {}".format(self.aggregator))

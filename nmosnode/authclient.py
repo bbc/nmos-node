@@ -49,14 +49,15 @@ def get_credentials_from_file(filename=CREDENTIALS_PATH):
 
 
 class AuthRegistrar(object):
+    """Class responsible for registering an OAuth2 client with the Auth Server"""
     def __init__(self, client_name, redirect_uri, client_uri=None,
-                 allowed_scope=None, allowed_grant="authorization_code",
+                 allowed_scope=None, allowed_grant=["authorization_code"],
                  allowed_response="code", auth_method="client_secret_basic"):
         self.client_name = client_name
         self.client_uri = client_uri
         self.redirect_uri = redirect_uri
         self.allowed_scope = allowed_scope
-        self.allowed_grant = allowed_grant
+        self.allowed_grant = "\n".join(allowed_grant)
         self.allowed_response = allowed_response
         self.auth_method = auth_method
 
@@ -126,7 +127,7 @@ class AuthRegistrar(object):
                 timeout=0.5,
                 proxies={'http': ''}
             )
-            reg_resp.raise_for_status()  # Raise error if status !=201
+            reg_resp.raise_for_status()  # Raise error if status != 201
             self._client_registry[self.client_name] = reg_resp.json()  # Keep a local record of registered clients
             return reg_resp.json()
         except HTTPError as e:
@@ -136,7 +137,9 @@ class AuthRegistrar(object):
 
 
 class AuthRegistry(OAuth):
-
+    """Subclass of top-level Authlib client.
+    Registers Auth Server URIs for requesting access tokens for each registered OAuth2 client.
+    Also responsible for storing and fetching bearer token"""
     def __init__(self):
         super(AuthRegistry, self).__init__()
         self.bridge = IppmDNSBridge()

@@ -46,6 +46,7 @@ from .api import NODE_APIVERSIONS # noqa E402
 from .api import NODE_REGVERSION # noqa E402
 from .aggregator import Aggregator # noqa E402
 from .aggregator import MDNSUpdater # noqa E402
+from .authclient import AuthRegistry # noqa E402
 
 from nmoscommon.utils import getLocalIP # noqa E402
 from nmoscommon.mdns import MDNSEngine # noqa E402
@@ -125,7 +126,8 @@ class NodeFacadeService:
                 self.logger,
                 txt_recs=self._mdns_txt(NODE_APIVERSIONS, protocol, OAUTH_MODE)
             )
-        self.aggregator = Aggregator(self.logger, self.mdns_updater)
+        self.auth_registry = AuthRegistry()
+        self.aggregator = Aggregator(self.logger, self.mdns_updater, self.auth_registry)
 
     def _mdns_txt(self, versions, protocol, oauth_mode):
         return {
@@ -250,7 +252,7 @@ class NodeFacadeService:
         )
         self.registry_cleaner = FacadeRegistryCleaner(self.registry)
         self.registry_cleaner.start()
-        self.httpServer = HttpServer(FacadeAPI, PORT, '0.0.0.0', api_args=[self.registry])
+        self.httpServer = HttpServer(FacadeAPI, PORT, '0.0.0.0', api_args=[self.registry, self.auth_registry])
         self.httpServer.start()
         while not self.httpServer.started.is_set():
             self.logger.writeInfo('Waiting for httpserver to start...')
