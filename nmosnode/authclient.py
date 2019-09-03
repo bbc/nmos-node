@@ -43,9 +43,11 @@ def get_credentials_from_file(filename=CREDENTIALS_PATH):
         client_id = credentials['client_id']
         client_secret = credentials['client_secret']
         return client_id, client_secret
-    except OSError as e:
-        logger.writeError("Could not read OAuth client credentials from file: {}. {}".format(filename, e))
+    except (OSError, IOError) as e:
+        logger.writeError("Could not read OAuth2 client credentials from file: {}. Error: {}".format(filename, e))
         raise
+    except KeyError as e:
+        logger.writeError("OAuth2 credentials not found in file: {}. Error: {}".format(filename, e))
 
 
 class AuthRegistrar(object):
@@ -108,7 +110,7 @@ class AuthRegistrar(object):
                 json.dump(data, f)
             os.chmod(file_path, 0o600)
             return True
-        except OSError as e:
+        except (OSError, IOError) as e:
             logger.writeError(
                 "Could not write OAuth client credentials to file {}. {}".format(file_path, e)
             )
