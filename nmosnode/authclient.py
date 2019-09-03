@@ -22,7 +22,7 @@ from authlib.flask.client import OAuth
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge
 from nmoscommon.logger import Logger
 
-CREDENTIALS_PATH = os.path.join('/home/dannym/', 'oauth_credentials.json')  # Change this back after testing
+CREDENTIALS_PATH = os.path.join('/var/nmos-node', 'facade.json')  # Change this back after testing
 
 MDNS_SERVICE_TYPE = "nmos-auth"
 
@@ -72,12 +72,15 @@ class AuthRegistrar(object):
         If not, register with Auth Server and write client credentials to file."""
         try:
             if os.path.isfile(CREDENTIALS_PATH):
-                logger.writeWarning("Credentials file already exists. Using existing credentials.")
-                self.client_id, self.client_secret = get_credentials_from_file(CREDENTIALS_PATH)
-            else:
-                logger.writeInfo("Registering with Authorization Server...")
-                reg_resp_json = self.send_oauth_registration_request()
-                self.write_credentials_to_file(reg_resp_json, CREDENTIALS_PATH)
+                with open(CREDENTIALS_PATH, 'r') as f:
+                    data = json.load(f)
+                if "client_id" in data and "client_secret" in data:
+                    logger.writeWarning("Credentials file already exists. Using existing credentials.")
+                    self.client_id, self.client_secret = get_credentials_from_file(CREDENTIALS_PATH)
+                    return True
+            logger.writeInfo("Registering with Authorization Server...")
+            reg_resp_json = self.send_oauth_registration_request()
+            self.write_credentials_to_file(reg_resp_json, CREDENTIALS_PATH)
             return True
         except Exception as e:
             logger.writeError(
@@ -93,8 +96,16 @@ class AuthRegistrar(object):
                 "client_id": self.client_id,
                 "client_secret": self.client_secret
             }
+            # Create directory structure for file_path
+            if os.path.exists(file_path):
+                with open(file_path) as f:
+                    data = json.load(f)
+                data.update(credentials)
+            else:
+                data = credentials
+            # Write credentials to file
             with open(file_path, 'w') as f:
-                json.dump(credentials, f)
+                json.dump(data, f)
             os.chmod(file_path, 0o600)
             return True
         except OSError as e:
@@ -127,7 +138,7 @@ class AuthRegistrar(object):
                 timeout=0.5,
                 proxies={'http': ''}
             )
-            reg_resp.raise_for_status()  # Raise error if status != 201
+            reg_resp.raise_for_status()  # Raise error if status is an error code
             self._client_registry[self.client_name] = reg_resp.json()  # Keep a local record of registered clients
             return reg_resp.json()
         except HTTPError as e:
