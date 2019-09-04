@@ -341,24 +341,26 @@ class Aggregator(object):
         client_name = node_object['data']['description']
         client_uri = 'http://' + node_object['data']['label']
 
-        if OAUTH_MODE is True and self.auth_registrar is None:
-            self.auth_registrar = self._auth_register(
-                client_name=client_name,
-                client_uri=client_uri
-            )
-        if self._registered['auth_client_registered'] and self.auth_client is None:
-            try:
-                # Register Node Client
-                self.auth_registry.register_client(client_name=client_name, client_uri=client_uri)
-            except (OSError, IOError):
-                self.logger.writeError("Exception accessing OAuth credentials. Could not register OAuth2 client.")
-                return
-            # Extract the 'RemoteApp' class created when registering
-            self.auth_client = getattr(self.auth_registry, client_name)
-            # Fetch Token
-            self.fetch_auth_token()
+        if OAUTH_MODE is True:
+            if self.auth_registrar is None:
+                self.auth_registrar = self._auth_register(
+                    client_name=client_name,
+                    client_uri=client_uri
+                )
+            if self._registered['auth_client_registered'] and self.auth_client is None:
+                try:
+                    # Register Node Client
+                    self.auth_registry.register_client(client_name=client_name, client_uri=client_uri)
+                except (OSError, IOError):
+                    self.logger.writeError("Exception accessing OAuth credentials. Could not register OAuth2 client.")
+                    return
+                # Extract the 'RemoteApp' class created when registering
+                self.auth_client = getattr(self.auth_registry, client_name)
+                # Fetch Token
+                self.fetch_auth_token()
 
     def fetch_auth_token(self):
+        """Fetch Access Token either using redirection grant flow or using auth_client"""
         if self.auth_client is not None and self.auth_registrar is not None:
             try:
                 if "authorization_code" in self.auth_registrar.allowed_grant:
@@ -383,7 +385,7 @@ class Aggregator(object):
             allowed_scope=ALLOWED_SCOPE,
             allowed_grant=ALLOWED_GRANTS
         )
-        if auth_registrar.initialised is True:
+        if auth_registrar.registered is True:
             self._registered['auth_client_registered'] = True
             return auth_registrar
 

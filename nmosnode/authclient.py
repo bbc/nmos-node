@@ -22,7 +22,7 @@ from authlib.flask.client import OAuth
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge
 from nmoscommon.logger import Logger
 
-CREDENTIALS_PATH = os.path.join('/var/nmos-node', 'facade.json')  # Change this back after testing
+CREDENTIALS_PATH = os.path.join('/home/dannym', 'facade.json')  # Change this back after testing
 
 MDNS_SERVICE_TYPE = "nmos-auth"
 
@@ -46,6 +46,7 @@ def get_credentials_from_file(filename):
         raise
     except KeyError as e:
         logger.writeError("OAuth2 credentials not found in file: {}. Error: {}".format(filename, e))
+        raise
 
 
 class AuthRegistrar(object):
@@ -65,6 +66,7 @@ class AuthRegistrar(object):
         self.client_secret = None
         self.bridge = IppmDNSBridge()
         self._client_registry = {}
+        self.registered = False  # Flag to signify Node is registered with Auth Server
         self.initialised = self.initialise(CREDENTIALS_PATH)
 
     def initialise(self, credentials_path):
@@ -77,9 +79,13 @@ class AuthRegistrar(object):
                 if "client_id" in data and "client_secret" in data:
                     logger.writeWarning("Credentials file already exists. Using existing credentials.")
                     self.client_id, self.client_secret = get_credentials_from_file(credentials_path)
+                    self.registered = True
                     return True
             logger.writeInfo("Registering with Authorization Server...")
-            reg_resp_json = self.send_oauth_registration_request()
+            if self.registered is False:
+                reg_resp_json = self.send_oauth_registration_request()
+                self.registered = True
+            logger.writeInfo("Writing OAuth2 credentials to file...")
             self.write_credentials_to_file(reg_resp_json, credentials_path)
             return True
         except Exception as e:
@@ -96,7 +102,7 @@ class AuthRegistrar(object):
                 "client_id": self.client_id,
                 "client_secret": self.client_secret
             }
-            # Create directory structure for file_path
+            # Load contents if file exists
             if os.path.exists(file_path):
                 with open(file_path) as f:
                     data = json.load(f)
@@ -106,7 +112,6 @@ class AuthRegistrar(object):
             # Write credentials to file
             with open(file_path, 'w') as f:
                 json.dump(data, f)
-            os.chmod(file_path, 0o600)
             return True
         except (OSError, IOError) as e:
             logger.writeError(
