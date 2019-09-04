@@ -31,12 +31,10 @@ REGISTRATION_ENDPOINT = urljoin(API_NAMESPACE, 'register_client')
 AUTHORIZATION_ENDPOINT = urljoin(API_NAMESPACE, 'authorize')
 TOKEN_ENDPOINT = urljoin(API_NAMESPACE, 'token')
 
-TOKEN_KEY = 'token'
-
 logger = Logger("auth_client", None)
 
 
-def get_credentials_from_file(filename=CREDENTIALS_PATH):
+def get_credentials_from_file(filename):
     try:
         with open(filename, 'r') as f:
             credentials = json.load(f)
@@ -67,22 +65,22 @@ class AuthRegistrar(object):
         self.client_secret = None
         self.bridge = IppmDNSBridge()
         self._client_registry = {}
-        self.initialised = self.initialise()
+        self.initialised = self.initialise(CREDENTIALS_PATH)
 
-    def initialise(self):
+    def initialise(self, credentials_path):
         """Check if credentials file already exists, meaning the device is already registered.
         If not, register with Auth Server and write client credentials to file."""
         try:
-            if os.path.isfile(CREDENTIALS_PATH):
-                with open(CREDENTIALS_PATH, 'r') as f:
+            if os.path.isfile(credentials_path):
+                with open(credentials_path, 'r') as f:
                     data = json.load(f)
                 if "client_id" in data and "client_secret" in data:
                     logger.writeWarning("Credentials file already exists. Using existing credentials.")
-                    self.client_id, self.client_secret = get_credentials_from_file(CREDENTIALS_PATH)
+                    self.client_id, self.client_secret = get_credentials_from_file(credentials_path)
                     return True
             logger.writeInfo("Registering with Authorization Server...")
             reg_resp_json = self.send_oauth_registration_request()
-            self.write_credentials_to_file(reg_resp_json, CREDENTIALS_PATH)
+            self.write_credentials_to_file(reg_resp_json, credentials_path)
             return True
         except Exception as e:
             logger.writeError(
@@ -174,8 +172,8 @@ class AuthRegistry(OAuth):
     def update_local_token(self, token):
         self.bearer_token = token
 
-    def register_client(self, client_name, client_uri):
-        client_id, client_secret = get_credentials_from_file(CREDENTIALS_PATH)
+    def register_client(self, client_name, client_uri, credentials_path=CREDENTIALS_PATH):
+        client_id, client_secret = get_credentials_from_file(credentials_path)
         self.client_name = client_name
         self.client_uri = client_uri
         return self.register(

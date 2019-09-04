@@ -352,6 +352,7 @@ class Aggregator(object):
                 self.auth_registry.register_client(client_name=client_name, client_uri=client_uri)
             except (OSError, IOError):
                 self.logger.writeError("Exception accessing OAuth credentials. Could not register OAuth2 client.")
+                return
             # Extract the 'RemoteApp' class created when registering
             self.auth_client = getattr(self.auth_registry, client_name)
             # Fetch Token
@@ -435,6 +436,8 @@ class Aggregator(object):
                             except Exception as e:
                                 self.logger.writeError("Error re-requesting token: {}. Removing Auth Client".format(e))
                                 self.auth_client = None
+                        except OAuth2Error as e:
+                            self.logger.writeError("Failed to fetch token before making API call. Error: {}".format(e))
 
                 if R is None:
                     # Try another aggregator
