@@ -35,8 +35,7 @@ back-end data providers.
 
 def is_package(path):
     return (
-        os.path.isdir(path) and
-        os.path.isfile(os.path.join(path, '__init__.py'))
+        os.path.isdir(path) and os.path.isfile(os.path.join(path, '__init__.py'))
     )
 
 
@@ -62,7 +61,7 @@ package_names = packages.keys()
 packages_required = [
     "six",
     "cysystemd",
-    "nmoscommon",
+    "nmoscommon>=0.19.13",
     "requests",
     "gevent",
     "mdnsbridge>=0.7.0"
