@@ -25,6 +25,7 @@ from nmoscommon.logger import Logger
 from nmoscommon import ptptime
 from nmoscommon.mdns.mdnsExceptions import ServiceAlreadyExistsException
 from nmoscommon.nmoscommonconfig import config as _config
+from nmoscommon.utils import translate_api_version, api_ver_compare
 
 from .api import NODE_REGVERSION
 
@@ -70,164 +71,6 @@ class FacadeRegistryCleaner(threading.Thread):
     def stop(self):
         self.stopping = True
         self.join()
-
-
-def api_version_less_than(a, b):
-    ver_a = a[1:].split(".")
-    ver_b = b[1:].split(".")
-    return ver_a[0] < ver_b[0] or (ver_a[0] == ver_b[0] and ver_a[1] < ver_b[1])
-
-
-def legalise_resource(res, rtype, api_version):
-    RESOURCE_CORE_V1_1 = ["id",
-                          "version",
-                          "label",
-                          "description",
-                          "tags"]
-    # v1.0 begins
-    legalkeys = {
-        ("node", "v1.0"): [
-            "id",
-            "version",
-            "label",
-            "href",
-            "hostname",
-            "caps",
-            "services",
-        ],
-        ("device", "v1.0"): [
-            "id",
-            "version",
-            "label",
-            "type",
-            "node_id",
-            "senders",
-            "receivers"
-        ],
-        ("source", "v1.0"): [
-            "id",
-            "label",
-            "description",
-            "format",
-            "caps",
-            "tags",
-            "parents",
-            "version",
-            "device_id",
-        ],
-        ("flow", "v1.0"): [
-            "id",
-            "version",
-            "label",
-            "description",
-            "tags",
-            "format",
-            "tags",
-            "source_id",
-            "parents",
-        ],
-        ("sender", "v1.0"): [
-            "id",
-            "version",
-            "label",
-            "description",
-            "flow_id",
-            "transport",
-            "tags",
-            "device_id",
-            "manifest_href",
-        ],
-        ("receiver", "v1.0"): [
-            "id",
-            "version",
-            "label",
-            "description",
-            "format",
-            "caps",
-            "tags",
-            "device_id",
-            "transport",
-            "subscription"
-        ]
-    }
-    # v1.0 ends
-
-    # v1.1 begins
-    legalkeys[("node", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                   legalkeys[("node", "v1.0")] +
-                                   ["api", "clocks"])
-    legalkeys[("device", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                     legalkeys[("device", "v1.0")] +
-                                     ["controls"])
-    legalkeys[("source", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                     legalkeys[("source", "v1.0")] +
-                                     ["clock_name", "grain_rate"] +
-                                     ["channels"])
-    legalkeys[("flow", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                   legalkeys[("flow", "v1.0")] +
-                                   ["device_id", "grain_rate", "media_type"] +
-                                   ["sample_rate", "bit_depth"] +
-                                   ["DID_SDID"] +
-                                   ["frame_width", "frame_height",
-                                    "interlace_mode", "colorspace",
-                                    "components", "transfer_characteristic"])
-    legalkeys[("sender", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                     legalkeys[("sender", "v1.0")])
-    legalkeys[("receiver", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                       legalkeys[("receiver", "v1.0")])
-    # v1.1 ends
-
-    # v1.2 begins
-    legalkeys[("node", "v1.2")] = (legalkeys[("node", "v1.1")] +
-                                   ["interfaces"])
-    legalkeys[("device", "v1.2")] = (legalkeys[("device", "v1.1")])
-    legalkeys[("source", "v1.2")] = (legalkeys[("source", "v1.1")])
-    legalkeys[("flow", "v1.2")] = (legalkeys[("flow", "v1.1")])
-    legalkeys[("sender", "v1.2")] = (legalkeys[("sender", "v1.1")] +
-                                     ["interface_bindings", "subscription"])
-    legalkeys[("receiver", "v1.2")] = (legalkeys[("receiver", "v1.1")] +
-                                       ["interface_bindings"])
-    # v1.2 ends
-
-    # v1.3 begins
-    legalkeys[("node", "v1.3")] = (legalkeys[("node", "v1.2")])
-    legalkeys[("device", "v1.3")] = (legalkeys[("device", "v1.2")])
-    legalkeys[("source", "v1.3")] = (legalkeys[("source", "v1.2")] + ["event_type"])
-    legalkeys[("flow", "v1.3")] = (legalkeys[("flow", "v1.2")] + ["event_type"])
-    legalkeys[("sender", "v1.3")] = (legalkeys[("sender", "v1.2")])
-
-    # v1.3 ends
-
-    if (rtype, api_version) not in legalkeys:
-        return res
-
-    retval = dict()
-    for key in legalkeys[(rtype, api_version)]:
-        if key in res:
-            retval[key] = copy.deepcopy(res[key])
-
-        # Catch final items inside objects.
-        # Ideally find a better way long term which uses schemas and as such checks missing keys too
-        if rtype == "receiver":
-            if api_version == "v1.0":
-                if "caps" in retval:
-                    retval["caps"] = {}
-            if api_version in ["v1.0", "v1.1"]:
-                if "subscription" in retval:
-                    retval["subscription"].pop("active", None)
-        if api_version == "v1.3":
-            if rtype == "node":
-                for interface in retval["interfaces"]:
-                    interface.pop("attached_network_device", None)
-                for endpoint in retval["api"]["endpoints"]:
-                    endpoint.pop("authorization", None)
-                for service in retval["services"]:
-                    service.pop("authorization", None)
-            if rtype == "device":
-                for control in retval["controls"]:
-                    control.pop("authorization", None)
-
-    return retval
 
 
 class FacadeRegistry(object):
@@ -353,7 +196,7 @@ class FacadeRegistry(object):
                     "Service {}: Registration without valid api version specified".format(service_name)
                 )
                 value["max_api_version"] = "v1.0"
-            elif api_version_less_than(value["max_api_version"], NODE_REGVERSION):
+            elif api_ver_compare(value["max_api_version"], NODE_REGVERSION) < 0:
                 self.logger.writeWarning(
                     "Trying to register resource with api version too low: '{}' : {}".format(key, json.dumps(value))
                 )
@@ -496,14 +339,14 @@ class FacadeRegistry(object):
             if "controls" in value_copy:
                 for control in value_copy["controls"]:
                     control["href"] = self.preprocess_url(control["href"])
-            return legalise_resource(value_copy, type, api_version)
+            return translate_api_version(value_copy, type, api_version)
         elif type == "sender":
             value_copy = copy.deepcopy(value)
             if "manifest_href" in value_copy:
                 value_copy["manifest_href"] = self.preprocess_url(value_copy["manifest_href"])
-            return legalise_resource(value_copy, type, api_version)
+            return translate_api_version(value_copy, type, api_version)
         else:
-            return legalise_resource(value, type, api_version)
+            return translate_api_version(value, type, api_version)
 
     def list_resource(self, type, api_version="v1.0"):
         if type not in self.permitted_resources:
@@ -514,7 +357,7 @@ class FacadeRegistry(object):
                 (k, self.preprocess_resource(type, k, x, api_version))
                 for (k, x) in self.services[name]["resource"][type].items()
                 if (api_version == "v1.0" or (
-                    "max_api_version" in x and not api_version_less_than(x["max_api_version"], api_version)
+                    "max_api_version" in x and api_ver_compare(x["max_api_version"], api_version) >= 0
                 ))
             ]))
         return response
