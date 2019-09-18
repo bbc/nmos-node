@@ -25,7 +25,7 @@ from six import itervalues # noqa E402
 from six.moves.urllib.parse import urljoin # noqa E402
 from socket import getfqdn  # noqa E402
 from authlib.oauth2.rfc6750 import InvalidTokenError # noqa E402
-from authlib.oauth2.base import OAuth2Error # noqa E402
+from authlib.oauth2 import OAuth2Error # noqa E402
 
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge # noqa E402
 from nmoscommon.logger import Logger # noqa E402
@@ -34,9 +34,14 @@ from nmoscommon.nmoscommonconfig import config as _config # noqa E402
 
 from .authclient import AuthRegistrar # noqa E402
 
-AGGREGATOR_APIVERSION = _config.get('nodefacade').get('NODE_REGVERSION')
-AGGREGATOR_APINAMESPACE = "x-nmos"
+APINAMESPACE = "x-nmos"
+
 AGGREGATOR_APINAME = "registration"
+AGGREGATOR_APIVERSION = _config.get('nodefacade').get('NODE_REGVERSION')
+AGGREGATOR_APIROOT = '/' + APINAMESPACE + '/' + AGGREGATOR_APINAME + '/'
+
+NODE_APINAME = "node"
+NODE_APIROOT = '/' + APINAMESPACE + '/' + NODE_APINAME + '/'
 
 LEGACY_REG_MDNSTYPE = "nmos-registration"
 REGISTRATION_MDNSTYPE = "nmos-register"
@@ -44,10 +49,6 @@ REGISTRATION_MDNSTYPE = "nmos-register"
 OAUTH_MODE = _config.get("oauth_mode", False)
 ALLOWED_GRANTS = ["authorization_code", "refresh_token", "client_credentials"]
 ALLOWED_SCOPE = "is-04"
-
-NODE_APINAMESPACE = "x-nmos"
-NODE_APINAME = "node"
-NODE_APIROOT = NODE_APINAMESPACE + '/' + NODE_APINAME + '/'
 
 
 class NoAggregator(Exception):
@@ -365,7 +366,7 @@ class Aggregator(object):
             try:
                 if "authorization_code" in self.auth_registrar.allowed_grant:
                     # Open browser at endpoint for redirecting to Auth Server's /authorize endpoint
-                    webbrowser.open("http://" + getfqdn() + "/x-nmos/node/login")
+                    webbrowser.open("http://" + getfqdn() + NODE_APIROOT + "login")
                 elif "client_credentials" in self.auth_registrar.allowed_grant:
                     # Fetch Token
                     token = self.auth_client.fetch_access_token()
@@ -380,7 +381,7 @@ class Aggregator(object):
         """Register OAuth client with Authorization Server"""
         auth_registrar = AuthRegistrar(
             client_name=client_name,
-            redirect_uri='http://' + getfqdn() + '/x-nmos/node/authorize',
+            redirect_uri='http://' + getfqdn() + NODE_APIROOT + 'authorize',
             client_uri=client_uri,
             allowed_scope=ALLOWED_SCOPE,
             allowed_grant=ALLOWED_GRANTS
@@ -401,7 +402,7 @@ class Aggregator(object):
             data = json.dumps(data)
             headers.update({"Content-Type": "application/json"})
 
-        url = AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url
+        url = AGGREGATOR_APIROOT + AGGREGATOR_APIVERSION + url
         for i in range(0, 3):
             if self.aggregator == "":
                 self.logger.writeWarning("No aggregator available on the network or mdnsbridge unavailable")
