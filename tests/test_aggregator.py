@@ -25,7 +25,7 @@ import json
 import requests
 import traceback
 from nmosnode.aggregator import Aggregator, InvalidRequest, REGISTRATION_MDNSTYPE, AGGREGATOR_APIVERSION
-from nmosnode.aggregator import NoAggregator, AGGREGATOR_APINAMESPACE, LEGACY_REG_MDNSTYPE, AGGREGATOR_APINAME
+from nmosnode.aggregator import NoAggregator, LEGACY_REG_MDNSTYPE, AGGREGATOR_APIROOT
 from nmosnode.aggregator import TooManyRetries
 import nmosnode
 
@@ -806,7 +806,7 @@ class TestAggregator(unittest.TestCase):
                     method,
                     urljoin(
                         aggregator_url,
-                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url
+                        AGGREGATOR_APIROOT + AGGREGATOR_APIVERSION + url
                     ),
                     data=expected_data,
                     headers=headers,
@@ -816,7 +816,7 @@ class TestAggregator(unittest.TestCase):
                     method,
                     urljoin(
                         aggregator_url,
-                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url
+                        AGGREGATOR_APIROOT + AGGREGATOR_APIVERSION + url
                     ),
                     data=expected_data,
                     headers=headers,
