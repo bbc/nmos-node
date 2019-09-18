@@ -45,7 +45,6 @@ class TestAggregator(unittest.TestCase):
                  'gevent.spawn']
         patchers = {name: mock.patch(name) for name in paths}
         self.mocks = {name: patcher.start() for (name, patcher) in iteritems(patchers)}
-
         self.addCleanup(mock.patch.stopall)
 
         def printmsg(t):
@@ -53,11 +52,11 @@ class TestAggregator(unittest.TestCase):
                 print(t + ": " + msg)
             return _inner
 
-#        self.mocks['nmosnode.aggregator.Logger'].return_value.writeInfo.side_effect = printmsg("INFO")
-#        self.mocks['nmosnode.aggregator.Logger'].return_value.writeWarning.side_effect = printmsg("WARNING")
-#        self.mocks['nmosnode.aggregator.Logger'].return_value.writeDebug.side_effect = printmsg("DEBUG")
-#        self.mocks['nmosnode.aggregator.Logger'].return_value.writeError.side_effect = printmsg("ERROR")
-#        self.mocks['nmosnode.aggregator.Logger'].return_value.writeFatal.side_effect = printmsg("FATAL")
+        # self.mocks['nmosnode.aggregator.Logger'].return_value.writeInfo.side_effect = printmsg("INFO")
+        # self.mocks['nmosnode.aggregator.Logger'].return_value.writeWarning.side_effect = printmsg("WARNING")
+        # self.mocks['nmosnode.aggregator.Logger'].return_value.writeDebug.side_effect = printmsg("DEBUG")
+        # self.mocks['nmosnode.aggregator.Logger'].return_value.writeError.side_effect = printmsg("ERROR")
+        # self.mocks['nmosnode.aggregator.Logger'].return_value.writeFatal.side_effect = printmsg("FATAL")
 
     def test_init(self):
         """Test a call to Aggregator()"""
@@ -766,7 +765,7 @@ class TestAggregator(unittest.TestCase):
     def assert_send_runs_correctly(
         self, method,
         url, data=None,
-        headers=None,
+        headers={},
         to_point=SEND_ITERATION_0,
         initial_aggregator="",
         aggregator_urls=[
@@ -803,8 +802,8 @@ class TestAggregator(unittest.TestCase):
         def create_mock_request(method, url, aggregator_url, expected_data, headers, prefer_ipv6=False):
             if not prefer_ipv6:
                 return (mock.call(
-                    method,
-                    urljoin(
+                    method=method,
+                    url=urljoin(
                         aggregator_url,
                         AGGREGATOR_APIROOT + AGGREGATOR_APIVERSION + url
                     ),
@@ -813,8 +812,8 @@ class TestAggregator(unittest.TestCase):
                     timeout=1.0))
             else:
                 return (mock.call(
-                    method,
-                    urljoin(
+                    method=method,
+                    url=urljoin(
                         aggregator_url,
                         AGGREGATOR_APIROOT + AGGREGATOR_APIVERSION + url
                     ),

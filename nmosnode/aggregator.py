@@ -14,7 +14,9 @@
 
 from gevent import monkey
 monkey.patch_all()
-from gevent import sleep, queue, spawn  # noqa E402
+# The below imports allow for modules to be mocked in test_aggregator.py
+import gevent # noqa E402
+import gevent.queue  # noqa E402
 
 import requests # noqa E402
 import json # noqa E402
@@ -99,9 +101,9 @@ class Aggregator(object):
         self.auth_client = None  # Instance of Oauth client responsible for performing token requests
 
         self._running = True
-        self._reg_queue = queue.Queue()
-        self.heartbeat_thread = spawn(self._heartbeat)
-        self.queue_thread = spawn(self._process_queue)
+        self._reg_queue = gevent.queue.Queue()
+        self.heartbeat_thread = gevent.spawn(self._heartbeat)
+        self.queue_thread = gevent.spawn(self._process_queue)
 
     def _heartbeat(self):
         """The heartbeat thread runs in the background every five seconds.
@@ -141,7 +143,7 @@ class Aggregator(object):
                 if(self._mdns_updater is not None):
                     self._mdns_updater.inc_P2P_enable_count()
             while heartbeat_wait > 0 and self._running:
-                sleep(1)
+                gevent.sleep(1)
                 heartbeat_wait -= 1
         self.logger.writeDebug("Stopping heartbeat thread")
 
@@ -153,7 +155,7 @@ class Aggregator(object):
         # Checks queue not empty before quitting to make sure unregister node gets done
         while self._running or (self._registered["registered"] and not self._reg_queue.empty()):
             if not self._registered["registered"] or self._reg_queue.empty():
-                sleep(1)
+                gevent.sleep(1)
             else:
                 try:
                     queue_item = self._reg_queue.get()
@@ -275,7 +277,7 @@ class Aggregator(object):
         while not self._reg_queue.empty():
             try:
                 self._reg_queue.get(block=False)
-            except queue.Queue.Empty:
+            except gevent.queue.Queue.Empty:
                 break
 
         try:
@@ -339,10 +341,10 @@ class Aggregator(object):
 
     def register_auth_client(self, node_object):
         """Function for Registering OAuth client with Auth Server and instantiating OAuth Client class"""
-        client_name = node_object['data']['description']
-        client_uri = 'http://' + node_object['data']['label']
 
         if OAUTH_MODE is True:
+            client_name = node_object['data']['description']
+            client_uri = 'http://' + node_object['data']['label']
             if self.auth_registrar is None:
                 self.auth_registrar = self._auth_register(
                     client_name=client_name,
@@ -498,13 +500,13 @@ class MDNSUpdater(object):
         self.mdns.register(self.mdns_name, self.mdns_type, self.port, self.txt_rec_base)
 
         self._running = True
-        self._mdns_update_queue = queue.Queue()
-        self.mdns_thread = spawn(self._modify_mdns)
+        self._mdns_update_queue = gevent.queue.Queue()
+        self.mdns_thread = gevent.spawn(self._modify_mdns)
 
     def _modify_mdns(self):
         while self._running:
             if self._mdns_update_queue.empty():
-                sleep(0.2)
+                gevent.sleep(0.2)
             else:
                 try:
                     txt_recs = self._mdns_update_queue.get()
