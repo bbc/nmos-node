@@ -14,23 +14,25 @@
 
 from __future__ import print_function
 
-from os import urandom
-from flask import request, url_for, redirect
-from nmoscommon.webapi import WebAPI, route, resource_route, abort
-from six.moves.urllib.parse import urljoin
-from six import itervalues
 import requests
+from os import urandom
 from socket import gethostname
+from flask import request, url_for, redirect
+from six import itervalues
+from six.moves.urllib.parse import urljoin
 
+from nmoscommon.webapi import WebAPI, route, resource_route, abort
 from nmoscommon.nmoscommonconfig import config as _config
 
 NODE_APIVERSIONS = ["v1.0", "v1.1", "v1.2", "v1.3"]
 if _config.get("https_mode", "disabled") == "enabled":
     NODE_APIVERSIONS.remove("v1.0")
 NODE_REGVERSION = _config.get('nodefacade', {}).get('NODE_REGVERSION', 'v1.2')
+
 NODE_APINAMESPACE = "x-nmos"
 NODE_APINAME = "node"
 NODE_APIROOT = '/' + NODE_APINAMESPACE + '/' + NODE_APINAME + '/'
+
 HOSTNAME = gethostname().split(".", 1)[0]
 RESOURCE_TYPES = ["sources", "flows", "devices", "senders", "receivers"]
 

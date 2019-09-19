@@ -34,16 +34,13 @@ from nmoscommon.logger import Logger # noqa E402
 from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException # noqa E402
 from nmoscommon.nmoscommonconfig import config as _config # noqa E402
 
+from .api import NODE_APIROOT # noqa E402
 from .authclient import AuthRegistrar # noqa E402
 
 APINAMESPACE = "x-nmos"
-
 AGGREGATOR_APINAME = "registration"
 AGGREGATOR_APIVERSION = _config.get('nodefacade').get('NODE_REGVERSION')
 AGGREGATOR_APIROOT = '/' + APINAMESPACE + '/' + AGGREGATOR_APINAME + '/'
-
-NODE_APINAME = "node"
-NODE_APIROOT = '/' + APINAMESPACE + '/' + NODE_APINAME + '/'
 
 LEGACY_REG_MDNSTYPE = "nmos-registration"
 REGISTRATION_MDNSTYPE = "nmos-register"
@@ -261,6 +258,9 @@ class Aggregator(object):
         try:
             self.logger.writeDebug("Clearing old Node from API prior to re-registration")
             self._SEND("DELETE", "/resource/nodes/" + self._registered["node"]["data"]["id"])
+        except OAuth2Error as e:
+            self.logger.writeInfo("Invalid Request due to lack of Authorization. {}".format(e))
+            return
         except InvalidRequest as e:
             # 404 etc is ok
             self.logger.writeInfo("Invalid request when deleting Node prior to registration: {}".format(e))

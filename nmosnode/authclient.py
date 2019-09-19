@@ -22,14 +22,14 @@ from authlib.flask.client import OAuth
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge
 from nmoscommon.logger import Logger
 
-CREDENTIALS_PATH = os.path.join('/home/dannym', 'facade.json')  # Change this back after testing
+CREDENTIALS_PATH = os.path.join('/var/nmos-node', 'facade.json')  # Change this back after testing
 
 MDNS_SERVICE_TYPE = "nmos-auth"
 
-API_NAMESPACE = 'x-nmos/auth/v1.0/'
-REGISTRATION_ENDPOINT = urljoin(API_NAMESPACE, 'register_client')
-AUTHORIZATION_ENDPOINT = urljoin(API_NAMESPACE, 'authorize')
-TOKEN_ENDPOINT = urljoin(API_NAMESPACE, 'token')
+AUTH_APIROOT = 'x-nmos/auth/v1.0/'
+REGISTRATION_ENDPOINT = urljoin(AUTH_APIROOT, 'register_client')
+AUTHORIZATION_ENDPOINT = urljoin(AUTH_APIROOT, 'authorize')
+TOKEN_ENDPOINT = urljoin(AUTH_APIROOT, 'token')
 
 logger = Logger("auth_client", None)
 
