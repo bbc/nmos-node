@@ -14,19 +14,20 @@
 
 from __future__ import print_function, absolute_import
 
+import json
 import time
 import threading
 import copy
-
 from six.moves.urllib.parse import urlparse, urlunparse
 from six import itervalues
+
 from nmoscommon.logger import Logger
 from nmoscommon import ptptime
 from nmoscommon.mdns.mdnsExceptions import ServiceAlreadyExistsException
-from .api import NODE_REGVERSION
-import json
-
 from nmoscommon.nmoscommonconfig import config as _config
+from nmoscommon.utils import translate_api_version, api_ver_compare
+
+from .api import NODE_REGVERSION
 
 try:
     # Use internal BBC RD ipputils to get PTP if available
@@ -72,144 +73,6 @@ class FacadeRegistryCleaner(threading.Thread):
         self.join()
 
 
-def api_version_less_than(a, b):
-    ver_a = a[1:].split(".")
-    ver_b = b[1:].split(".")
-    return ver_a[0] < ver_b[0] or (ver_a[0] == ver_b[0] and ver_a[1] < ver_b[1])
-
-
-def legalise_resource(res, rtype, api_version):
-    RESOURCE_CORE_V1_1 = ["id",
-                          "version",
-                          "label",
-                          "description",
-                          "tags"]
-    # v1.0 begins
-    legalkeys = {
-        ("node", "v1.0"): [
-            "id",
-            "version",
-            "label",
-            "href",
-            "hostname",
-            "caps",
-            "services",
-        ],
-        ("device", "v1.0"): [
-            "id",
-            "version",
-            "label",
-            "type",
-            "node_id",
-            "senders",
-            "receivers"
-        ],
-        ("source", "v1.0"): [
-            "id",
-            "label",
-            "description",
-            "format",
-            "caps",
-            "tags",
-            "parents",
-            "version",
-            "device_id",
-        ],
-        ("flow", "v1.0"): [
-            "id",
-            "version",
-            "label",
-            "description",
-            "tags",
-            "format",
-            "tags",
-            "source_id",
-            "parents",
-        ],
-        ("sender", "v1.0"): [
-            "id",
-            "version",
-            "label",
-            "description",
-            "flow_id",
-            "transport",
-            "tags",
-            "device_id",
-            "manifest_href",
-        ],
-        ("receiver", "v1.0"): [
-            "id",
-            "version",
-            "label",
-            "description",
-            "format",
-            "caps",
-            "tags",
-            "device_id",
-            "transport",
-            "subscription"
-        ]
-    }
-    # v1.0 ends
-
-    # v1.1 begins
-    legalkeys[("node", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                   legalkeys[("node", "v1.0")] +
-                                   ["api", "clocks"])
-    legalkeys[("device", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                     legalkeys[("device", "v1.0")] +
-                                     ["controls"])
-    legalkeys[("source", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                     legalkeys[("source", "v1.0")] +
-                                     ["clock_name", "grain_rate"] +
-                                     ["channels"])
-    legalkeys[("flow", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                   legalkeys[("flow", "v1.0")] +
-                                   ["device_id", "grain_rate", "media_type"] +
-                                   ["sample_rate", "bit_depth"] +
-                                   ["DID_SDID"] +
-                                   ["frame_width", "frame_height",
-                                    "interlace_mode", "colorspace",
-                                    "components", "transfer_characteristic"])
-    legalkeys[("sender", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                     legalkeys[("sender", "v1.0")])
-    legalkeys[("receiver", "v1.1")] = (RESOURCE_CORE_V1_1 +
-                                       legalkeys[("receiver", "v1.0")])
-    # v1.1 ends
-
-    # v1.2 begins
-    legalkeys[("node", "v1.2")] = (legalkeys[("node", "v1.1")] +
-                                   ["interfaces"])
-    legalkeys[("device", "v1.2")] = (legalkeys[("device", "v1.1")])
-    legalkeys[("source", "v1.2")] = (legalkeys[("source", "v1.1")])
-    legalkeys[("flow", "v1.2")] = (legalkeys[("flow", "v1.1")])
-    legalkeys[("sender", "v1.2")] = (legalkeys[("sender", "v1.1")] +
-                                     ["interface_bindings", "subscription"])
-    legalkeys[("receiver", "v1.2")] = (legalkeys[("receiver", "v1.1")] +
-                                       ["interface_bindings"])
-    # v1.2 ends
-
-    if (rtype, api_version) not in legalkeys:
-        return res
-
-    retval = dict()
-    for key in legalkeys[(rtype, api_version)]:
-        if key in res:
-            retval[key] = copy.deepcopy(res[key])
-
-        # Catch final items inside objects.
-        # Ideally find a better way long term which uses schemas and as such checks missing keys too
-        if rtype == "receiver":
-            if api_version == "v1.0":
-                if "caps" in retval:
-                    retval["caps"] = {}
-            if api_version in ["v1.0", "v1.1"]:
-                if "subscription" in retval:
-                    retval["subscription"].pop("active", None)
-
-    return retval
-
-
 class FacadeRegistry(object):
     def __init__(self, resources, aggregator, mdns_updater, node_id, node_data, logger=None):
         # `node_data` must be correctly structured
@@ -236,7 +99,11 @@ class FacadeRegistry(object):
             if self.services[service_name]["href"]:
                 if self.services[service_name]["proxy_path"]:
                     href = self.node_data["href"] + self.services[service_name]["proxy_path"]
-            self.node_data["services"].append({"href": href, "type": self.services[service_name]["type"]})
+            self.node_data["services"].append({
+                "href": href,
+                "type": self.services[service_name]["type"],
+                "authorization": self.services[service_name]["authorization"]
+            })
         self.node_data["clocks"] = list(itervalues(self.clocks))
         self.node_data["version"] = str(ptptime.ptp_detail()[0]) + ":" + str(ptptime.ptp_detail()[1])
         try:
@@ -245,7 +112,7 @@ class FacadeRegistry(object):
         except Exception as e:
             self.logger.writeError("Exception re-registering node: {}".format(e))
 
-    def register_service(self, name, srv_type, pid, href=None, proxy_path=None):
+    def register_service(self, name, srv_type, pid, href=None, proxy_path=None, authorization=False):
         if name in self.services:
             return RES_EXISTS
 
@@ -256,7 +123,8 @@ class FacadeRegistry(object):
             "pid": pid,
             "href": href,
             "proxy_path": proxy_path,
-            "type": srv_type
+            "type": srv_type,
+            "authorization": authorization
         }
 
         for resource_name in self.permitted_resources:
@@ -312,7 +180,14 @@ class FacadeRegistry(object):
         return self._register(service_name, "resource", pid, type, key, value)
 
     def register_control(self, service_name, pid, device_id, control_data):
-        return self._register(service_name, "control", pid, device_id, "add", control_data)
+        return self._register(
+            service_name=service_name,
+            namespace="control",
+            pid=pid,
+            type=device_id,
+            key="add",
+            value=control_data
+        )
 
     def _register(self, service_name, namespace, pid, type, key, value):
         if namespace != "control":
@@ -321,7 +196,7 @@ class FacadeRegistry(object):
                     "Service {}: Registration without valid api version specified".format(service_name)
                 )
                 value["max_api_version"] = "v1.0"
-            elif api_version_less_than(value["max_api_version"], NODE_REGVERSION):
+            elif api_ver_compare(value["max_api_version"], NODE_REGVERSION) < 0:
                 self.logger.writeWarning(
                     "Trying to register resource with api version too low: '{}' : {}".format(key, json.dumps(value))
                 )
@@ -464,14 +339,14 @@ class FacadeRegistry(object):
             if "controls" in value_copy:
                 for control in value_copy["controls"]:
                     control["href"] = self.preprocess_url(control["href"])
-            return legalise_resource(value_copy, type, api_version)
+            return translate_api_version(value_copy, type, api_version)
         elif type == "sender":
             value_copy = copy.deepcopy(value)
             if "manifest_href" in value_copy:
                 value_copy["manifest_href"] = self.preprocess_url(value_copy["manifest_href"])
-            return legalise_resource(value_copy, type, api_version)
+            return translate_api_version(value_copy, type, api_version)
         else:
-            return legalise_resource(value, type, api_version)
+            return translate_api_version(value, type, api_version)
 
     def list_resource(self, type, api_version="v1.0"):
         if type not in self.permitted_resources:
@@ -482,7 +357,7 @@ class FacadeRegistry(object):
                 (k, self.preprocess_resource(type, k, x, api_version))
                 for (k, x) in self.services[name]["resource"][type].items()
                 if (api_version == "v1.0" or (
-                    "max_api_version" in x and not api_version_less_than(x["max_api_version"], api_version)
+                    "max_api_version" in x and api_ver_compare(x["max_api_version"], api_version) >= 0
                 ))
             ]))
         return response

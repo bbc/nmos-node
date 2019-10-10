@@ -21,7 +21,7 @@ import os
 
 # Basic metadata
 name = "nodefacade"
-version = "0.10.8"
+version = "0.10.10"
 description = "BBC implementation of an AMWA NMOS Node API"
 url = "https://github.com/bbc/nmos-node"
 author = "Peter Brightwell"
@@ -35,8 +35,7 @@ back-end data providers.
 
 def is_package(path):
     return (
-        os.path.isdir(path) and
-        os.path.isfile(os.path.join(path, '__init__.py'))
+        os.path.isdir(path) and os.path.isfile(os.path.join(path, '__init__.py'))
     )
 
 
@@ -62,7 +61,7 @@ package_names = packages.keys()
 packages_required = [
     "six",
     "cysystemd",
-    "nmoscommon",
+    "nmoscommon>=0.19.13",
     "requests",
     "gevent",
     "mdnsbridge>=0.8.2"

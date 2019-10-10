@@ -1,7 +1,13 @@
 # NMOS Node API Implementation Changelog
 
-## 0.10.8
+## 0.10.10
 - Add exponential backoff when registration APIs return 500 responses
+
+## 0.10.9
+- Add api downgrade function from nmoscommon
+
+## 0.10.8
+- Add `api_auth` text record to mDNS announcements
 
 ## 0.10.7
 - Test code refactor
