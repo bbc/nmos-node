@@ -26,7 +26,7 @@ import time # noqa E402
 import gevent.queue # noqa E402
 
 from nmoscommon.logger import Logger # noqa E402
-from mdnsbridge.mdnsbridgeclient import IppmDNSBridge # noqa E402
+from mdnsbridge.mdnsbridgeclient import IppmDNSBridge, NoService, EndOfServiceList # noqa E402
 from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException # noqa E402
 
 from nmoscommon.nmoscommonconfig import config as _config # noqa E402
@@ -40,7 +40,7 @@ LEGACY_REG_MDNSTYPE = "nmos-registration"
 REGISTRATION_MDNSTYPE = "nmos-register"
 
 BACKOFF_INITIAL_TIMOUT_SECONDS = 5
-BACKOFF_MAX_TIMEOUT_SECONDS = 360
+BACKOFF_MAX_TIMEOUT_SECONDS = 120
 
 
 class NoAggregator(Exception):
@@ -50,22 +50,25 @@ class NoAggregator(Exception):
         super(NoAggregator, self).__init__("No Registration API found")
 
 
-class EndOfAggregatorList(Exception):
+class RequestTimeout(Exception):
     pass
 
 
 class InvalidRequest(Exception):
-    def __init__(self, status_code=400, mdns_updater=None):
-        if mdns_updater is not None:
-            mdns_updater.inc_P2P_enable_count()
+    """Client Side Error during request, HTTP 4xx"""
+    def __init__(self, status_code=400):
         super(InvalidRequest, self).__init__("Invalid Request, code {}".format(status_code))
         self.status_code = status_code
 
 
+class ServerSideError(Exception):
+    """Exception raised when a HTTP 5xx, timeout or inability to connect returned during request.
+    This indicates a server side or connectivity issue"""
+    pass
+
+
 class TooManyRetries(Exception):
     def __init__(self, mdns_updater=None):
-        if mdns_updater is not None:
-            mdns_updater.inc_P2P_enable_count()
         super(TooManyRetries, self).__init__("Too many retries.")
 
 
@@ -76,13 +79,12 @@ class Aggregator(object):
     def __init__(self, logger=None, mdns_updater=None):
         self.logger = Logger("aggregator_proxy", logger)
         self.mdnsbridge = IppmDNSBridge(logger=self.logger)
-        self.aggregator = ""
-        self.aggregators = []
+        self.aggregator = None
         self.registration_order = ["device", "source", "flow", "sender", "receiver"]
         self._mdns_updater = mdns_updater
         # 'registered' is a local mirror of aggregated items. There are helper methods
         # for manipulating this below.
-        self._registered = {
+        self._node_data = {
             'node': None,
             'registered': False,
             'entities': {
@@ -92,54 +94,204 @@ class Aggregator(object):
         }
         self._running = True
         self._backoff_active = False
+        self._backoff_period = 0
         self._reg_queue = gevent.queue.Queue()
         self.heartbeat_thread = gevent.spawn(self._heartbeat_thread)
         self.queue_thread = gevent.spawn(self._process_queue)
 
+    def _get_service_type(self):rute
+        if AGGREGATOR_APIVERSION in ['v1.0', 'v1.1', 'v1.2']:
+            return LEGACY_REG_MDNSTYPE
+        else:
+            return REGISTRATION_MDNSTYPE
+
+    def _discovery(self):
+        # Wait backoff period
+        self._back_off_timer()
+
+        # Update cached list of aggregators
+        self._flush_cached_aggregators()
+
+        self.aggregator = self._get_aggregator()
+
+        if self.aggregator is None:
+            return
+
+        self._heartbeat()
+
+    def _register_node(self):
+        if self._node_data.get("node", None) is None:
+            self.logger.writeDebug("No node registered, register returning")
+            return False
+
+        # Drain the queue
+        while not self._reg_queue.empty():
+            try:
+                self._reg_queue.get(block=False)
+            except gevent.queue.Queue.Empty:
+                break
+
+        try:
+            for i in range(0, 3):
+                R = self._send("POST", self.aggregator, AGGREGATOR_APIVERSION, "/resource", self._node_data["node"])
+
+                if R.status_code == 201:
+                    # Continue to registered operation
+                    self._registered()
+                    # Post heatbeat straight away to prevent race with garbage collection
+                    self._heartbeat()
+
+                    # Trigger registration of Nodes resources
+                    self._register_node_resources()
+
+                    return True
+
+                elif R.status_code in [200, 409]:
+                    # Delete node from registry & re-register
+                    if self._unregister_node(R.headers['Location']):
+                        continue
+                    else:
+                        # Try next registry
+                        return False
+        except Exception as ex:
+            self.writeError("Failed to register node {}".format(ex))
+            return False
+
+    def _register_node_resources(self):
+        # Re-register items that must be ordered
+        # Re-register things we have in the local cache.
+        # "namespace" is e.g. "resource"
+        # "entities" are the things associated under that namespace.
+        for res_type in self.registration_order:
+            for namespace, entities in self._node_data["entities"].items():
+                if res_type in entities:
+                    self.logger.writeInfo("Ordered re-registration for type: '{}' in namespace '{}'"
+                                          .format(res_type, namespace))
+                    for key in entities[res_type]:
+                        self._queue_request("POST", namespace, res_type, key)
+
+        # Re-register everything else
+        # Re-register things we have in the local cache.
+        # "namespace" is e.g. "resource"
+        # "entities" are the things associated under that namespace.
+        for namespace, entities in self._node_data["entities"].items():
+            for res_type in entities:
+                if res_type not in self.registration_order:
+                    self.logger.writeInfo("Unordered re-registration for type: '{}' in namespace '{}'"
+                                          .format(res_type, namespace))
+                    for key in entities[res_type]:
+                        self._queue_request("POST", namespace, res_type, key)
+
+    def _registered(self):
+        """Mark Node as registered and reset counters"""
+        if(self._mdns_updater is not None):
+            self._mdns_updater.P2P_disable()
+
+        self._node_data['registered'] = True
+
+        self._reset_backoff_period()
+
+    def _reset_backoff_period(self):
+        self._backoff_period = 0
+
+    def _increase_backoff_period(self):
+        """Exponentially increase the backoff period, until set maximum reached"""
+        if self._backoff_period == 0:
+            self._backoff_period = BACKOFF_INITIAL_TIMOUT_SECONDS
+            return
+
+        self._backoff_period * 2
+        if self._backoff_period > BACKOFF_MAX_TIMEOUT_SECONDS:
+            self._backoff_period = BACKOFF_MAX_TIMEOUT_SECONDS
+
+    def _back_off_timer(self):
+        self.logger.writeDebug("Backoff timer enabled for {} seconds".format(self._backoff_period))
+        gevent.sleep(self._backoff_period)
+
+    def _flush_cached_aggregators(self):
+        self.mdnsbridge.updateServices(self._get_service_type)
+
+    def _get_aggregator(self):
+        protocol = "http"
+        if _config.get('https_mode') == "enabled":
+            protocol = "https"
+
+        try:
+            return self.mdnsbridge.getHrefWithException(self._get_service_type, None, AGGREGATOR_APIVERSION, protocol)
+        except NoService:
+            if mdns_updater is not None:
+                mdns_updater.inc_P2P_enable_count()
+            self._increase_backoff_period()
+            return None
+        except EndOfServiceList:
+            self._increase_backoff_period()
+            return None
+
+    def _unregister_node(self, url_path):
+        """Delete node from registry"""
+        try:
+            self._node_data['registered'] = False
+            R = self._send_request('DELETE', self.aggregator, url_path)
+
+            if R.status_code == 204:
+                # Successfully deleted node from Registry
+                return True
+            else:
+                return False
+        except Exception:
+            return False
+
     def _heartbeat(self):
         try:
             self.logger.writeDebug("Sending heartbeat for Node {}"
-                                   .format(self._registered["node"]["data"]["id"]))
-            self._SEND("POST", "/health/nodes/" + self._registered["node"]["data"]["id"])
+                                   .format(self._node_data["node"]["data"]["id"]))
+            R = self._send(self.aggregator, AGGREGATOR_APIVERSION, "POST", "/health/nodes/" + self._node_data["node"]["data"]["id"])
+
+            if R.status_code == 200 and self._node_data["registered"]:
+                # Continue to registered operation
+                self._registered()
+                return True
+                   
+            elif R.status_code in [200, 409]:
+                # Delete node from registry
+                if self._unregister_node(R.headers['Location']):
+                    self._register_node()
+                    return True
+                else:
+                    # Try next registry
+                    return False
+
         except InvalidRequest as e:
             if e.status_code == 404:
                 # Re-register
                 self.logger.writeWarning("404 error on heartbeat. Marking Node for re-registration")
-                self._registered["registered"] = False
-
-                if(self._mdns_updater is not None):
-                    self._mdns_updater.inc_P2P_enable_count()
+                self._node_data["registered"] = False
+                self._register_node()
             else:
-                # Client side error. Report this upwards via exception, but don't resend
-                self.logger.writeError("Unrecoverable error code {} received from Registration API on heartbeat"
-                                       .format(e.status_code))
-                self._running = False
-        except (EndOfAggregatorList, TooManyRetries) as e:
-            self.logger.writeWarning("End of Aggregator list while heartbeating: {}"
-                                     .format(e))
-            if not self._backoff_active:
-                # Start backoff timer to allow aggregator time to recover
-                gevent.spawn(self._backoff_timer_thread)
+                # Other error, try next registry
+                return False
+        except ServerSideError:
+            self.logger.writeWarning("Server Side Error on heartbeat. Trying another registry")
+            return False
         except Exception:
             # Re-register
             self.logger.writeWarning("Unexpected error on heartbeat. Marking Node for re-registration")
-            self._registered["registered"] = False
+            self._node_data["registered"] = False
+            return False
 
     # The heartbeat thread runs in the background every five seconds.
     # If when it runs the Node is believed to be registered it will perform a heartbeat
     def _heartbeat_thread(self):
         self.logger.writeDebug("Starting heartbeat thread")
         while self._running:
-            while self._backoff_active:
-                gevent.sleep(1)
             heartbeat_wait = 5
-            if not self._registered["registered"]:
-                self._process_reregister()
-            elif self._registered["node"]:
+            if not self._node_data["registered"]:
+                self._discovery()
+            elif self._node_data["node"]:
                 # Do heartbeat
                 self._heartbeat()
             else:
-                self._registered["registered"] = False
+                self._node_data["registered"] = False
                 if(self._mdns_updater is not None):
                     self._mdns_updater.inc_P2P_enable_count()
 
@@ -159,7 +311,7 @@ class Aggregator(object):
 
             self._process_reregister()
 
-            if self._registered["registered"]:
+            if self._node_data["registered"]:
                 self._backoff_active = False
                 return
             else:
@@ -173,8 +325,8 @@ class Aggregator(object):
     def _process_queue(self):
         self.logger.writeDebug("Starting HTTP queue processing thread")
         # Checks queue not empty before quitting to make sure unregister node gets done
-        while self._running or (self._registered["registered"] and not self._reg_queue.empty()):
-            if not self._registered["registered"] or self._reg_queue.empty() or self._backoff_active:
+        while self._running or (self._node_data["registered"] and not self._reg_queue.empty()):
+            if not self._node_data["registered"] or self._reg_queue.empty() or self._backoff_active:
                 gevent.sleep(1)
             else:
                 try:
@@ -184,13 +336,13 @@ class Aggregator(object):
                     res_key = queue_item["key"]
                     if queue_item["method"] == "POST":
                         if res_type == "node":
-                            data = self._registered["node"]
+                            data = self._node_data["node"]
                             try:
                                 self.logger.writeInfo("Attempting registration for Node {}"
-                                                      .format(self._registered["node"]["data"]["id"]))
+                                                      .format(self._node_data["node"]["data"]["id"]))
                                 self._SEND("POST", "/{}".format(namespace), data)
-                                self._SEND("POST", "/health/nodes/" + self._registered["node"]["data"]["id"])
-                                self._registered["registered"] = True
+                                self._SEND("POST", "/health/nodes/" + self._node_data["node"]["data"]["id"])
+                                self._node_data["registered"] = True
                                 if self._mdns_updater is not None:
                                     self._mdns_updater.P2P_disable()
 
@@ -203,14 +355,14 @@ class Aggregator(object):
                             except Exception:
                                 self.logger.writeWarning("Error registering Node: %r" % (traceback.format_exc(),))
 
-                        elif res_key in self._registered["entities"][namespace][res_type]:
-                            data = self._registered["entities"][namespace][res_type][res_key]
+                        elif res_key in self._node_data["entities"][namespace][res_type]:
+                            data = self._node_data["entities"][namespace][res_type][res_key]
                             try:
                                 self._SEND("POST", "/{}".format(namespace), data)
                             except InvalidRequest as e:
                                 self.logger.writeWarning("Error registering {} {}: {}".format(res_type, res_key, e))
                                 self.logger.writeWarning("Request data: {}".format(data))
-                                del self._registered["entities"][namespace][res_type][res_key]
+                                del self._node_data["entities"][namespace][res_type][res_key]
 
                     elif queue_item["method"] == "DELETE":
                         translated_type = res_type + 's'
@@ -229,7 +381,7 @@ class Aggregator(object):
                         # Start backoff timer to allow aggregator time to recover
                         gevent.spawn(self._backoff_timer_thread)
                 except Exception:
-                    self._registered["registered"] = False
+                    self._node_data["registered"] = False
                     if(self._mdns_updater is not None):
                         self._mdns_updater.P2P_disable()
         self.logger.writeDebug("Stopping HTTP queue processing thread")
@@ -258,111 +410,29 @@ class Aggregator(object):
 
         if namespace == "resource" and res_type == "node":
             # Handle special Node type
-            self._registered["node"] = send_obj
+            self._node_data["node"] = send_obj
         else:
             self._add_mirror_keys(namespace, res_type)
-            self._registered["entities"][namespace][res_type][key] = send_obj
+            self._node_data["entities"][namespace][res_type][key] = send_obj
         self._queue_request("POST", namespace, res_type, key)
 
     # General unregister method for 'resource' types
     def unregister_from(self, namespace, res_type, key):
         if namespace == "resource" and res_type == "node":
             # Handle special Node type
-            self._registered["node"] = None
-        elif res_type in self._registered["entities"][namespace]:
+            self._node_data["node"] = None
+        elif res_type in self._node_data["entities"][namespace]:
             self._add_mirror_keys(namespace, res_type)
-            if key in self._registered["entities"][namespace][res_type]:
-                del self._registered["entities"][namespace][res_type][key]
+            if key in self._node_data["entities"][namespace][res_type]:
+                del self._node_data["entities"][namespace][res_type][key]
         self._queue_request("DELETE", namespace, res_type, key)
 
     # Deal with missing keys in local mirror
     def _add_mirror_keys(self, namespace, res_type):
-        if namespace not in self._registered["entities"]:
-            self._registered["entities"][namespace] = {}
-        if res_type not in self._registered["entities"][namespace]:
-            self._registered["entities"][namespace][res_type] = {}
-
-    # Re-register just the Node, and queue requests in order for other resources
-    def _process_reregister(self):
-        if self._registered.get("node", None) is None:
-            self.logger.writeDebug("No node registered, re-register returning")
-            return
-
-        try:
-            self.logger.writeDebug("Clearing old Node from API prior to re-registration")
-            self._SEND("DELETE", "/resource/nodes/" + self._registered["node"]["data"]["id"])
-        except InvalidRequest as e:
-            # 404 etc is ok
-            self.logger.writeInfo("Invalid request when deleting Node prior to registration: {}".format(e))
-        except (EndOfAggregatorList, TooManyRetries) as e:
-            self.logger.writeWarning("End of Aggregator list while deleting: {}"
-                                     .format(e))
-            self._registered["registered"] = False
-            if not self._backoff_active:
-                # Start backoff timer to allow aggregator time to recover
-                gevent.spawn(self._backoff_timer_thread)
-            return
-        except Exception as ex:
-            # Server error is bad, no point continuing
-            self._backoff_active = False
-            self.logger.writeError("Aborting Node re-register! {}".format(ex))
-            return
-
-        self._registered["registered"] = False
-        if(self._mdns_updater is not None):
-            self._mdns_updater.inc_P2P_enable_count()
-
-        # Drain the queue
-        while not self._reg_queue.empty():
-            try:
-                self._reg_queue.get(block=False)
-            except gevent.queue.Queue.Empty:
-                break
-
-        try:
-            # Register the node, and immediately heartbeat if successful to avoid race with garbage collect.
-            self.logger.writeInfo("Attempting re-registration for Node {}"
-                                  .format(self._registered["node"]["data"]["id"]))
-            self._SEND("POST", "/resource", self._registered["node"])
-            self._SEND("POST", "/health/nodes/" + self._registered["node"]["data"]["id"])
-            self._registered["registered"] = True
-            if self._mdns_updater is not None:
-                self._mdns_updater.P2P_disable()
-        except (EndOfAggregatorList, TooManyRetries) as e:
-            self.logger.writeWarning("End of Aggregator list while registering: {}"
-                                     .format(e))
-            if not self._backoff_active:
-                # Start backoff timer to allow aggregator time to recover
-                gevent.spawn(self._backoff_timer_thread)
-            return
-        except Exception as e:
-            self.logger.writeWarning("Error re-registering Node: {}".format(e))
-            self.aggregator = ""  # Fallback to prevent us getting stuck if the Reg API issues a 4XX error incorrectly
-            return
-
-        # Re-register items that must be ordered
-        # Re-register things we have in the local cache.
-        # "namespace" is e.g. "resource"
-        # "entities" are the things associated under that namespace.
-        for res_type in self.registration_order:
-            for namespace, entities in self._registered["entities"].items():
-                if res_type in entities:
-                    self.logger.writeInfo("Ordered re-registration for type: '{}' in namespace '{}'"
-                                          .format(res_type, namespace))
-                    for key in entities[res_type]:
-                        self._queue_request("POST", namespace, res_type, key)
-
-        # Re-register everything else
-        # Re-register things we have in the local cache.
-        # "namespace" is e.g. "resource"
-        # "entities" are the things associated under that namespace.
-        for namespace, entities in self._registered["entities"].items():
-            for res_type in entities:
-                if res_type not in self.registration_order:
-                    self.logger.writeInfo("Unordered re-registration for type: '{}' in namespace '{}'"
-                                          .format(res_type, namespace))
-                    for key in entities[res_type]:
-                        self._queue_request("POST", namespace, res_type, key)
+        if namespace not in self._node_data["entities"]:
+            self._node_data["entities"][namespace] = {}
+        if res_type not in self._node_data["entities"][namespace]:
+            self._node_data["entities"][namespace][res_type] = {}
 
     # Stop the Aggregator object running
     def stop(self):
@@ -374,116 +444,57 @@ class Aggregator(object):
     def status(self):
         return {"api_href": self.aggregator,
                 "api_version": AGGREGATOR_APIVERSION,
-                "registered": self._registered["registered"]}
+                "registered": self._node_data["registered"]}
 
-    # Handle sending all requests to the Registration API, and searching for a new 'aggregator' if one fails
-    def _SEND(self, method, url, data=None):
-        if self.aggregator == "":
-            self._change_aggregator()
+    def _send(self, method, aggregator, api_ver, url, data=None):
+        """Handle sending request to the registration API, with error handelling"""
 
+        url = AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + api_ver + url
+
+        try:
+            self._send_request(method, aggregator, url, data)
+            if R is None:
+                # Try another aggregator
+                self.logger.writeWarning("No response from aggregator {}".format(aggregator))
+                raise ServerSideError
+
+            elif R.status_code in [200, 201, 204, 409]:
+                return R
+
+            elif (R.status_code//100) == 4:
+                self.logger.writeWarning("{} response from aggregator: {} {}"
+                                         .format(R.status_code, method, urljoin(aggregator, url)))
+                raise InvalidRequest(R.status_code)
+
+            else:
+                self.logger.writeWarning("Unexpected status from aggregator {}: {}, {}"
+                                         .format(aggregator, R.status_code, R.content))
+                raise ServerSideError
+
+        except requests.exceptions.RequestException as ex:
+            # Log a warning, then let another aggregator be chosen
+            self.logger.writeWarning("{} from aggregator {}".format(ex, aggregator))
+            raise ServerSideError
+
+    def _send_request(self, method, aggregator, url, data=None):
+        """Low level method to send a HTTP request"""
         headers = None
         if data is not None:
             data = json.dumps(data)
             headers = {"Content-Type": "application/json"}
 
-        url = AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url
-        for i in range(0, 10):
+        self.logger.writeDebug("{} {}".format(method, urljoin(aggregator, url)))
 
-            self.logger.writeDebug("{} {}".format(method, urljoin(self.aggregator, url)))
-
-            # We give a long(ish) timeout below, as the async request may succeed after the timeout period
-            # has expired, causing the node to be registered twice (potentially at different aggregators).
-            # Whilst this isn't a problem in practice, it may cause excessive churn in websocket traffic
-            # to web clients - so, sacrifice a little timeliness for things working as designed the
-            # majority of the time...
-            try:
-                if _config.get('prefer_ipv6') is False:
-                    R = requests.request(method, urljoin(self.aggregator, url), data=data, timeout=1.0, headers=headers)
-                else:
-                    R = requests.request(method, urljoin(self.aggregator, url), data=data, timeout=1.0,
-                                         headers=headers, proxies={'http': ''})
-                if R is None:
-                    # Try another aggregator
-                    self.logger.writeWarning("No response from aggregator {}".format(self.aggregator))
-
-                elif R.status_code in [200, 201]:
-                    if R.headers.get("content-type", "text/plain").startswith("application/json"):
-                        return R.json()
-                    else:
-                        return R.content
-
-                elif R.status_code == 204:
-                    return
-
-                elif (R.status_code//100) == 4:
-                    self.logger.writeWarning("{} response from aggregator: {} {}"
-                                             .format(R.status_code, method, urljoin(self.aggregator, url)))
-                    raise InvalidRequest(R.status_code, self._mdns_updater)
-
-                else:
-                    self.logger.writeWarning("Unexpected status from aggregator {}: {}, {}"
-                                             .format(self.aggregator, R.status_code, R.content))
-
-            except requests.exceptions.RequestException as ex:
-                # Log a warning, then let another aggregator be chosen
-                self.logger.writeWarning("{} from aggregator {}".format(ex, self.aggregator))
-
-            # This aggregator is non-functional
-            self._change_aggregator()
-            self.logger.writeInfo("Updated aggregator to {} (try {})".format(self.aggregator, i))
-
-        raise TooManyRetries(self._mdns_updater)
-
-    def _change_aggregator(self):
-        """When a Node encounter a HTTP 5xx, Inability To Connect, Or A Timeout from a server, this indicates a server
-        side error. When this occurs the Node should try using a new aggregator, by sending a heartbeat to confirm the
-        Node is still present in the registry.
-        HTTP 200 response - Node present in registry
-        HTTP 404 response - Re-register
-        HTTP 500 response - Try next registry, if all fail backoff"""
-
-        # Get new aggregator
-        self.aggregator = self._get_service_href()
-
-        # Send heartbeat
-        # self._heartbeat()
-        # If success continue
-
-        # 404 Flag Re-Register
-
-        # 500 Try again until end of list
-
-    def _get_service_href(self):
-        """Get the next valid aggregator href
-        If no valid aggregators found, raise NoAggregator exception
-        If last aggregator in list used, raise EndOfAggregatorList exception"""
-
-        # First call to get aggregator
-        if self.aggregator == "":
-            self.aggregators = self._get_api_href_list()
-
-        try:
-            return self.aggregators.pop(0)
-        except Exception:
-            self.aggregator = ""
-            self.aggregators = self._get_api_href_list()
-            if not self.aggregators:
-                self.logger.writeWarning("No aggregator available on the network or mdnsbridge unavailable")
-                raise NoAggregator(self._mdns_updater)
-
-            raise EndOfAggregatorList
-
-    def _get_api_href_list(self):
-        protocol = "http"
-        if _config.get('https_mode') == "enabled":
-            protocol = "https"
-
-        api_href_list = self.mdnsbridge.getHrefList(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, protocol)
-
-        if not api_href_list:
-            api_href_list = self.mdnsbridge.getHrefList(LEGACY_REG_MDNSTYPE, None, AGGREGATOR_APIVERSION, protocol)
-
-        return api_href_list
+        # We give a long(ish) timeout below, as the async request may succeed after the timeout period
+        # has expired, causing the node to be registered twice (potentially at different aggregators).
+        # Whilst this isn't a problem in practice, it may cause excessive churn in websocket traffic
+        # to web clients - so, sacrifice a little timeliness for things working as designed the
+        # majority of the time...
+        if _config.get('prefer_ipv6') is False:
+            R = requests.request(method, urljoin(aggregator, url), data=data, timeout=1.0, headers=headers)
+        else:
+            R = requests.request(method, urljoin(aggregator, url), data=data, timeout=1.0,
+                                 headers=headers, proxies={'http': ''})
 
 
 class MDNSUpdater(object):
