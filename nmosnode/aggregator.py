@@ -99,29 +99,33 @@ class Aggregator(object):
         self.heartbeat_thread = gevent.spawn(self._heartbeat_thread)
         self.queue_thread = gevent.spawn(self._process_queue)
 
-    def _get_service_type(self):rute
+    def _get_service_type(self):
         if AGGREGATOR_APIVERSION in ['v1.0', 'v1.1', 'v1.2']:
             return LEGACY_REG_MDNSTYPE
         else:
             return REGISTRATION_MDNSTYPE
 
     def _discovery(self):
-        # Wait backoff period
-        self._back_off_timer()
+        while not self._node_data['registered']:
+            # Wait backoff period
+            self._back_off_timer()
 
-        # Update cached list of aggregators
-        self._flush_cached_aggregators()
+            # Update cached list of aggregators
+            self._flush_cached_aggregators()
 
-        self.aggregator = self._get_aggregator()
+            while True:
+                self.aggregator = self._get_aggregator()
 
-        if self.aggregator is None:
-            return
+                if self.aggregator is None:
+                    break
 
-        self._heartbeat()
+                if self._heartbeat():
+                    # Successfully registered Node
+                    break
 
     def _register_node(self):
         if self._node_data.get("node", None) is None:
-            self.logger.writeDebug("No node registered, register returning")
+            self.logger.writeDebug("No node data to register, register returning")
             return False
 
         # Drain the queue
@@ -132,14 +136,13 @@ class Aggregator(object):
                 break
 
         try:
+            # Try register the Node 3 times with aggregator before failing back to next aggregator 
             for i in range(0, 3):
                 R = self._send("POST", self.aggregator, AGGREGATOR_APIVERSION, "/resource", self._node_data["node"])
 
                 if R.status_code == 201:
                     # Continue to registered operation
                     self._registered()
-                    # Post heatbeat straight away to prevent race with garbage collection
-                    self._heartbeat()
 
                     # Trigger registration of Nodes resources
                     self._register_node_resources()
@@ -192,21 +195,25 @@ class Aggregator(object):
         self._reset_backoff_period()
 
     def _reset_backoff_period(self):
+        print('Reset backoff')
         self._backoff_period = 0
 
     def _increase_backoff_period(self):
         """Exponentially increase the backoff period, until set maximum reached"""
+        print("Increase Backoff")
         if self._backoff_period == 0:
             self._backoff_period = BACKOFF_INITIAL_TIMOUT_SECONDS
             return
 
-        self._backoff_period * 2
+        self._backoff_period *= 2
         if self._backoff_period > BACKOFF_MAX_TIMEOUT_SECONDS:
             self._backoff_period = BACKOFF_MAX_TIMEOUT_SECONDS
 
     def _back_off_timer(self):
         self.logger.writeDebug("Backoff timer enabled for {} seconds".format(self._backoff_period))
+        self._backoff_active = True
         gevent.sleep(self._backoff_period)
+        self._backoff_active = False
 
     def _flush_cached_aggregators(self):
         self.mdnsbridge.updateServices(self._get_service_type)
@@ -217,13 +224,15 @@ class Aggregator(object):
             protocol = "https"
 
         try:
-            return self.mdnsbridge.getHrefWithException(self._get_service_type, None, AGGREGATOR_APIVERSION, protocol)
+            return self.mdnsbridge.getHrefWithException(self._get_service_type(), None, AGGREGATOR_APIVERSION, protocol)
         except NoService:
-            if mdns_updater is not None:
-                mdns_updater.inc_P2P_enable_count()
+            self.logger.writeDebug("No Registration services found: {} {} {}".format(self._get_service_type(), AGGREGATOR_APIVERSION, protocol))
+            if self._mdns_updater is not None:
+                self._mdns_updater.inc_P2P_enable_count()
             self._increase_backoff_period()
             return None
         except EndOfServiceList:
+            self.logger.writeDebug("End of Registration services list: {} {} {}".format(self._get_service_type(), AGGREGATOR_APIVERSION, protocol))
             self._increase_backoff_period()
             return None
 
@@ -251,12 +260,11 @@ class Aggregator(object):
                 # Continue to registered operation
                 self._registered()
                 return True
-                   
+
             elif R.status_code in [200, 409]:
                 # Delete node from registry
                 if self._unregister_node(R.headers['Location']):
-                    self._register_node()
-                    return True
+                    return self._register_node()
                 else:
                     # Try next registry
                     return False
@@ -266,7 +274,7 @@ class Aggregator(object):
                 # Re-register
                 self.logger.writeWarning("404 error on heartbeat. Marking Node for re-registration")
                 self._node_data["registered"] = False
-                self._register_node()
+                return self._register_node()
             else:
                 # Other error, try next registry
                 return False
@@ -279,9 +287,10 @@ class Aggregator(object):
             self._node_data["registered"] = False
             return False
 
-    # The heartbeat thread runs in the background every five seconds.
-    # If when it runs the Node is believed to be registered it will perform a heartbeat
     def _heartbeat_thread(self):
+        """The heartbeat thread runs in the background every five seconds.
+        If when it runs the Node is believed to be registered it will perform a heartbeat"""
+
         self.logger.writeDebug("Starting heartbeat thread")
         while self._running:
             heartbeat_wait = 5
@@ -336,25 +345,7 @@ class Aggregator(object):
                     res_key = queue_item["key"]
                     if queue_item["method"] == "POST":
                         if res_type == "node":
-                            data = self._node_data["node"]
-                            try:
-                                self.logger.writeInfo("Attempting registration for Node {}"
-                                                      .format(self._node_data["node"]["data"]["id"]))
-                                self._SEND("POST", "/{}".format(namespace), data)
-                                self._SEND("POST", "/health/nodes/" + self._node_data["node"]["data"]["id"])
-                                self._node_data["registered"] = True
-                                if self._mdns_updater is not None:
-                                    self._mdns_updater.P2P_disable()
-
-                            except (EndOfAggregatorList, TooManyRetries) as e:
-                                self.logger.writeWarning("End of Aggregator list while registering Node: {}"
-                                                         .format(e))
-                                if not self._backoff_active:
-                                    # Start backoff timer to allow aggregator time to recover
-                                    gevent.spawn(self._backoff_timer_thread)
-                            except Exception:
-                                self.logger.writeWarning("Error registering Node: %r" % (traceback.format_exc(),))
-
+                            self._register_node()
                         elif res_key in self._node_data["entities"][namespace][res_type]:
                             data = self._node_data["entities"][namespace][res_type][res_key]
                             try:
@@ -374,12 +365,6 @@ class Aggregator(object):
                     else:
                         self.logger.writeWarning("Method {} not supported for Registration API interactions"
                                                  .format(queue_item["method"]))
-                except (EndOfAggregatorList, TooManyRetries) as e:
-                    self.logger.writeWarning("End of Aggregator list while registering: {}"
-                                             .format(e))
-                    if not self._backoff_active:
-                        # Start backoff timer to allow aggregator time to recover
-                        gevent.spawn(self._backoff_timer_thread)
                 except Exception:
                     self._node_data["registered"] = False
                     if(self._mdns_updater is not None):
