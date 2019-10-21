@@ -93,6 +93,7 @@ class Aggregator(object):
             }
         }
         self._running = True
+        self._aggregator_list_stale = True
         self._backoff_active = False
         self._backoff_period = 0
         self._reg_queue = gevent.queue.Queue()
@@ -106,15 +107,18 @@ class Aggregator(object):
             return REGISTRATION_MDNSTYPE
 
     def _discovery(self):
-        while not self._node_data['registered']:
+        self.logger.writeDebug("Entering Discovery Mode")
+        while not self._node_data['registered'] or not self.aggregator:
             # Wait backoff period
             self._back_off_timer()
 
             # Update cached list of aggregators
-            self._flush_cached_aggregators()
+            if self._aggregator_list_stale:
+                self._flush_cached_aggregators()
 
             while True:
                 self.aggregator = self._get_aggregator()
+                self.logger.writeDebug("Aggregator set to: {}".format(self.aggregator))
 
                 if self.aggregator is None:
                     break
@@ -136,7 +140,7 @@ class Aggregator(object):
                 break
 
         try:
-            # Try register the Node 3 times with aggregator before failing back to next aggregator 
+            # Try register the Node 3 times with aggregator before failing back to next aggregator
             for i in range(0, 3):
                 R = self._send("POST", self.aggregator, AGGREGATOR_APIVERSION, "/resource", self._node_data["node"])
 
@@ -191,16 +195,19 @@ class Aggregator(object):
             self._mdns_updater.P2P_disable()
 
         self._node_data['registered'] = True
+        self._aggregator_list_stale = True
 
         self._reset_backoff_period()
 
     def _reset_backoff_period(self):
-        print('Reset backoff')
+        self.logger.writeDebug("Resetting backoff period")
         self._backoff_period = 0
 
     def _increase_backoff_period(self):
         """Exponentially increase the backoff period, until set maximum reached"""
-        print("Increase Backoff")
+        self.logger.writeDebug("Increasing backoff period")
+        self._aggregator_list_stale = True
+
         if self._backoff_period == 0:
             self._backoff_period = BACKOFF_INITIAL_TIMOUT_SECONDS
             return
@@ -216,6 +223,8 @@ class Aggregator(object):
         self._backoff_active = False
 
     def _flush_cached_aggregators(self):
+        self.logger.writeDebug("Flushing cached list of aggregators")
+        self._aggregator_list_stale = False
         self.mdnsbridge.updateServices(self._get_service_type)
 
     def _get_aggregator(self):
@@ -251,10 +260,13 @@ class Aggregator(object):
             return False
 
     def _heartbeat(self):
+        """Performs a heartbeat to registered aggregator
+        If heartbeat fails it will take actions to correct the error, by re-registering the Node
+        If successfull will return True, else will return False"""
         try:
             self.logger.writeDebug("Sending heartbeat for Node {}"
                                    .format(self._node_data["node"]["data"]["id"]))
-            R = self._send(self.aggregator, AGGREGATOR_APIVERSION, "POST", "/health/nodes/" + self._node_data["node"]["data"]["id"])
+            R = self._send("POST", self.aggregator, AGGREGATOR_APIVERSION, "/health/nodes/" + self._node_data["node"]["data"]["id"])
 
             if R.status_code == 200 and self._node_data["registered"]:
                 # Continue to registered operation
@@ -293,12 +305,30 @@ class Aggregator(object):
 
         self.logger.writeDebug("Starting heartbeat thread")
         while self._running:
+            print('looping...')
             heartbeat_wait = 5
-            if not self._node_data["registered"]:
+            if not self._node_data["registered"] or not self.aggregator:
                 self._discovery()
             elif self._node_data["node"]:
                 # Do heartbeat
-                self._heartbeat()
+                while True:
+                    if not self.aggregator:
+                        print('breaking1')
+                        break
+                    if self._heartbeat():
+                        break
+                    heartbeat_wait = 0
+                    if self._node_data["registered"]:
+                        self.aggregator = None # Failed to send heartbeat
+                        break
+                    else:
+                        # Heartbet returns 404 and couldnt re-register, try next aggregator
+                        # Update cached list of aggregators
+                        if self._aggregator_list_stale:
+                            self._flush_cached_aggregators()
+
+                        self.aggregator = self._get_aggregator()
+                        self.logger.writeDebug("Aggregator changed to: {}".format(self.aggregator))
             else:
                 self._node_data["registered"] = False
                 if(self._mdns_updater is not None):
@@ -335,7 +365,10 @@ class Aggregator(object):
         self.logger.writeDebug("Starting HTTP queue processing thread")
         # Checks queue not empty before quitting to make sure unregister node gets done
         while self._running or (self._node_data["registered"] and not self._reg_queue.empty()):
-            if not self._node_data["registered"] or self._reg_queue.empty() or self._backoff_active:
+            if (not self._node_data["registered"] or
+                    self._reg_queue.empty() or
+                    self._backoff_active or
+                    not self.aggregator):
                 gevent.sleep(1)
             else:
                 try:
@@ -437,7 +470,7 @@ class Aggregator(object):
         url = AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + api_ver + url
 
         try:
-            self._send_request(method, aggregator, url, data)
+            R = self._send_request(method, aggregator, url, data)
             if R is None:
                 # Try another aggregator
                 self.logger.writeWarning("No response from aggregator {}".format(aggregator))
@@ -476,10 +509,10 @@ class Aggregator(object):
         # to web clients - so, sacrifice a little timeliness for things working as designed the
         # majority of the time...
         if _config.get('prefer_ipv6') is False:
-            R = requests.request(method, urljoin(aggregator, url), data=data, timeout=1.0, headers=headers)
+            return requests.request(method, urljoin(aggregator, url), data=data, timeout=1.0, headers=headers)
         else:
-            R = requests.request(method, urljoin(aggregator, url), data=data, timeout=1.0,
-                                 headers=headers, proxies={'http': ''})
+            return requests.request(method, urljoin(aggregator, url), data=data, timeout=1.0,
+                                    headers=headers, proxies={'http': ''})
 
 
 class MDNSUpdater(object):
