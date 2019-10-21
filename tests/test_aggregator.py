@@ -20,14 +20,13 @@ from six import PY2
 
 import unittest
 import mock
-import gevent
-import json
 import requests
-import copy
-from nmosnode.aggregator import Aggregator, InvalidRequest, REGISTRATION_MDNSTYPE, AGGREGATOR_APIVERSION
+import gevent
+from nmosnode.aggregator import Aggregator, InvalidRequest, REGISTRATION_MDNSTYPE
 from nmosnode.aggregator import AGGREGATOR_APINAMESPACE, LEGACY_REG_MDNSTYPE, AGGREGATOR_APINAME
-from nmosnode.aggregator import TooManyRetries, NoAggregator, EndOfAggregatorList
+from nmosnode.aggregator import ServerSideError
 from nmosnode.aggregator import BACKOFF_INITIAL_TIMOUT_SECONDS, BACKOFF_MAX_TIMEOUT_SECONDS
+from mdnsbridge.mdnsbridgeclient import NoService, EndOfServiceList
 import nmosnode
 
 MAX_ITERATIONS = 10
@@ -60,6 +59,10 @@ class TestAggregator(unittest.TestCase):
         # self.mocks['nmosnode.aggregator.Logger'].return_value.writeError.side_effect = printmsg("ERROR")
         # self.mocks['nmosnode.aggregator.Logger'].return_value.writeFatal.side_effect = printmsg("FATAL")
 
+    def construct_url(self, aggregator, api_ver, path):
+        """Constructs URL from aggregator and path, along with API version and namespace"""
+        return "{}/{}/{}/{}/{}".format(aggregator, AGGREGATOR_APINAMESPACE, AGGREGATOR_APINAME, api_ver, path)
+
     def test_init(self):
         """Test a call to Aggregator()"""
         self.mocks['gevent.spawn'].side_effect = lambda f: mock.MagicMock(thread_function=f)
@@ -70,8 +73,24 @@ class TestAggregator(unittest.TestCase):
         self.assertEqual(a.logger, self.mocks['nmosnode.aggregator.Logger'].return_value)
         self.mocks['nmosnode.aggregator.IppmDNSBridge'].assert_called_once_with(logger=a.logger)
         self.assertEqual(a._reg_queue, self.mocks['gevent.queue.Queue'].return_value)
-        self.assertEqual(a.heartbeat_thread.thread_function, a._heartbeat_thread)
+        self.assertEqual(a.main_thread.thread_function, a._main_thread)
         self.assertEqual(a.queue_thread.thread_function, a._process_queue)
+
+    def test_set_api_version(self):
+        """Test that setting the api version also sets the correct DNS-SD service type"""
+        a = Aggregator()
+        versions_service_type = [
+            {'api_ver': 'v1.0', 'srv_type': LEGACY_REG_MDNSTYPE},
+            {'api_ver': 'v1.1', 'srv_type': LEGACY_REG_MDNSTYPE},
+            {'api_ver': 'v1.2', 'srv_type': LEGACY_REG_MDNSTYPE},
+            {'api_ver': 'v1.3', 'srv_type': REGISTRATION_MDNSTYPE},
+        ]
+
+        for x in versions_service_type:
+            a._set_api_version(x['api_ver'])
+
+            self.assertEqual(a.aggregator_apiversion, x['api_ver'])
+            self.assertEqual(a.service_type, x['srv_type'])
 
     def test_register_into(self):
         """register_into() should register an object into a namespace, adding a scheduled call to the registration
@@ -91,7 +110,7 @@ class TestAggregator(unittest.TestCase):
             send_obj = {"type": o[0], "data": {k: v for (k, v) in iteritems(o[2])}}
             if 'id' not in send_obj['data']:
                 send_obj['data']['id'] = o[1]
-            self.assertEqual(a._registered["entities"][namespace][o[0]][o[1]], send_obj)
+            self.assertEqual(a._node_data["entities"][namespace][o[0]][o[1]], send_obj)
 
     def test_register(self):
         """register() should register an object into namespace "resource", adding a scheduled call to the registration
@@ -116,9 +135,9 @@ class TestAggregator(unittest.TestCase):
             if 'id' not in send_obj['data']:
                 send_obj['data']['id'] = o[1]
             if o[0] == "node":
-                self.assertEqual(a._registered["node"], send_obj)
+                self.assertEqual(a._node_data["node"], send_obj)
             else:
-                self.assertEqual(a._registered["entities"][namespace][o[0]][o[1]], send_obj)
+                self.assertEqual(a._node_data["entities"][namespace][o[0]][o[1]], send_obj)
 
     def test_unregister(self):
         """unregister() should schedule a call to unregister the specified devices.
@@ -141,9 +160,9 @@ class TestAggregator(unittest.TestCase):
                 "res_type": o[0],
                 "key": o[1]})
             if o[0] == "node":
-                self.assertIsNone(a._registered["node"])
+                self.assertIsNone(a._node_data["node"])
             else:
-                self.assertNotIn(o[1], a._registered["entities"][namespace][o[0]])
+                self.assertNotIn(o[1], a._node_data["entities"][namespace][o[0]])
 
     def test_stop(self):
         """A call to stop should set _running to false and then join the heartbeat thread."""
@@ -155,183 +174,872 @@ class TestAggregator(unittest.TestCase):
         a.stop()
 
         self.assertFalse(a._running)
-        a.heartbeat_thread.join.assert_called_with()
+        a.main_thread.join.assert_called_with()
         a.queue_thread.join.assert_called_with()
 
-    def test_heartbeat_registers(self):
-        """The heartbeat thread should trigger a registration of the node if the node is not yet registered
-        when it is run."""
+    def test_get_aggregator_returns_services_in_order(self):
+        """Test that each aggregator is returned in order"""
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a._registered["registered"] = False
+        test_aggregators = ['http://example0.com/aggregator/',
+                            'http://example1.com/aggregator/',
+                            'http://example2.com/aggregator/',
+                            'http://example3.com/aggregator/']
+
+        a.mdnsbridge.getHrefWithException.side_effect = test_aggregators
+
+        for agg in test_aggregators:
+            self.assertEqual(a._get_aggregator(), agg)
+
+    def test_get_aggregator_returns_none_when_end_of_list(self):
+        """Test that None is returned and backoff period is increased when EndofServiceList Exception raised"""
+        a = Aggregator(mdns_updater=mock.MagicMock())
+
+        a.mdnsbridge.getHrefWithException.side_effect = EndOfServiceList()
+
+        self.assertEqual(a._get_aggregator(), None)
+        self.assertEqual(a._backoff_period, BACKOFF_INITIAL_TIMOUT_SECONDS)
+
+    def test_get_aggregator_uses_correct_srv_type(self):
+        """Test that _get_aggregator uses the correct service type for API version and protocol type"""
+        a = Aggregator(mdns_updater=mock.MagicMock())
+
+        aggregator = "http://example0.com/aggregator/"
+        versions = ['v1.0', 'v1.1', 'v1.2', 'v1.3']
+        expected_calls = [
+            mock.call(LEGACY_REG_MDNSTYPE, None, versions[0], 'http'),
+            mock.call(LEGACY_REG_MDNSTYPE, None, versions[1], 'http'),
+            mock.call(LEGACY_REG_MDNSTYPE, None, versions[2], 'http'),
+            mock.call(REGISTRATION_MDNSTYPE, None, versions[3], 'http'),
+            mock.call(LEGACY_REG_MDNSTYPE, None, versions[0], 'https'),
+            mock.call(LEGACY_REG_MDNSTYPE, None, versions[1], 'https'),
+            mock.call(LEGACY_REG_MDNSTYPE, None, versions[2], 'https'),
+            mock.call(REGISTRATION_MDNSTYPE, None, versions[3], 'https'),
+        ]
+        a.mdnsbridge.getHrefWithException.return_value = aggregator
+
+        for v in versions:
+            a._set_api_version(v)
+            self.assertEqual(a._get_aggregator(), aggregator)
+
+        with mock.patch.dict(nmosnode.aggregator._config, {'https_mode': "enabled"}):
+            for v in versions:
+                a._set_api_version(v)
+                self.assertEqual(a._get_aggregator(), aggregator)
+
+        a.mdnsbridge.getHrefWithException.assert_has_calls(expected_calls)
+
+    def test_get_aggregator_returns_none_when_no_aggregators(self):
+        """Test that None is returned, increment P2P counter and backoff period is increased
+        when NoService Exception raised"""
+        a = Aggregator(mdns_updater=mock.MagicMock())
+
+        a.mdnsbridge.getHrefWithException.side_effect = NoService()
+
+        self.assertEqual(a._get_aggregator(), None)
+        self.assertEqual(a._backoff_period, BACKOFF_INITIAL_TIMOUT_SECONDS)
+        a._mdns_updater.inc_P2P_enable_count.assert_called_with()
+
+    def test_reset_backoff(self):
+        """Test backoff period is reset to zero"""
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._backoff_period = 100
+
+        a._reset_backoff_period()
+        self.assertEqual(a._backoff_period, 0)
+
+    def test_backoff_thread_timout(self):
+        """Check that the backoff thread, sets and un-sets the backoff flag after backoff period"""
+        a = Aggregator(mdns_updater=mock.MagicMock())
+
+        with mock.patch('gevent.sleep') as timer:
+            a._backoff_period = BACKOFF_INITIAL_TIMOUT_SECONDS
+            a._back_off_timer()
+            timer.assert_called_with(BACKOFF_INITIAL_TIMOUT_SECONDS)
+            self.assertFalse(a._backoff_active)
+
+    def test_increase_backoff_period(self):
+        """Check that the back off period is increased exponentially from its minimum to its maximum"""
+        a = Aggregator(mdns_updater=mock.MagicMock())
+
+        expected_values = []
+        for x in range(0, 3):
+            expected_values.append((BACKOFF_INITIAL_TIMOUT_SECONDS) * 2**x)
+        expected_values.append(BACKOFF_MAX_TIMEOUT_SECONDS)
+        expected_values.append(BACKOFF_MAX_TIMEOUT_SECONDS)
+
+        for x in expected_values:
+            a._aggregator_list_stale = False
+            a._increase_backoff_period()
+            self.assertEqual(a._backoff_period, x)
+            self.assertEqual(a._aggregator_list_stale, True)
+
+    # # ================================================================================================================
+    # # Test heartbeat operation
+    # # ================================================================================================================
+
+    def test_heartbeat_operation_200_when_registered(self):
+        """Test heartbeat operation when heartbeat request returns HTTP 200 when registered
+        After HTTP 200 heartbeat, Node should still be registered and should wait 5 seconds"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = True
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        a.aggregator = "http://example.com"
 
         def killloop(*args, **kwargs):
             a._running = False
 
-        with mock.patch('gevent.sleep', side_effect=killloop):
-            with mock.patch.object(a, '_process_reregister') as procreg:
-                with mock.patch.object(a, '_SEND') as SEND:
-                    a._heartbeat_thread()
+        def request(*args, **kwargs):
+            return mock.MagicMock(status_code=200)
 
-                    procreg.assert_called_with()
-                    SEND.assert_not_called()
+        with mock.patch('gevent.sleep', side_effect=killloop) as sleep:
+            with mock.patch.object(a, '_send', side_effect=request) as send:
+                return_val = a._heartbeat_operation()
+
+                self.assertTrue(return_val)
+                send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
+                                        "/health/nodes/{}".format(DUMMYNODEID))
+                a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+                self.assertTrue(a._node_data["registered"])
+                self.assertTrue(a._aggregator_list_stale)
+                self.assertEqual(a._backoff_period, 0)
+                sleep.assert_called_with(1)
+
+    def test_heartbeat_operation_200_when_not_registered(self):
+        """Test heartbeat operation when heartbeat request returns HTTP 200 when not registered
+        After HTTP 200 heartbeat, Node should unregister Node then perform re-registration with same aggregator"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = False
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        a.aggregator = "http://example.com"
+
+        def request(*args, **kwargs):
+            return mock.MagicMock(status_code=200, headers={'Location': 'path/xxx'})
+
+        with mock.patch.object(a, '_send', side_effect=request) as send:
+            with mock.patch.object(a, '_unregister_node', return_value=True) as un_reg:
+                with mock.patch.object(a, '_register_node', return_value=True) as register:
+                    return_val = a._heartbeat_operation()
+
+                    self.assertTrue(return_val)
+                    send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
+                                            "/health/nodes/{}".format(DUMMYNODEID))
                     a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+                    un_reg.assert_called_once_with('path/xxx')
+                    register.assert_called_once_with()
 
-    def test_heartbeat_unregisters_when_no_node(self):
-        """Each time the heartbeat thread finds there is no node it should mark the object as unregistered
-        and increment the P2P enable count."""
-        a = Aggregator(mdns_updater=mock.MagicMock())
-        a._registered["registered"] = True
-        a._registered["node"] = None
-
-        def killloop(*args, **kwargs):
-            a._running = False
-
-        with mock.patch('gevent.sleep', side_effect=killloop):
-            with mock.patch.object(a, '_process_reregister') as procreg:
-                with mock.patch.object(a, '_SEND') as SEND:
-                    a._heartbeat_thread()
-
-                    procreg.assert_not_called()
-                    SEND.assert_not_called()
-                    a._mdns_updater.inc_P2P_enable_count.assert_called_with()
-                    self.assertFalse(a._registered["registered"])
-
-    def test_heartbeat_correctly(self):
-        """Each time the heartbeat thread activates if there is already a registered node then it should trigger
-        a SEND of a heartbeat."""
+    def test_heartbeat_operation_200_when_not_registered_failure(self):
+        """Test heartbeat operation when heartbeat request returns HTTP 200 when not registered
+        and aggregator in failed state
+        After HTTP 200 heartbeat, Node should attempt to unregister node then return"""
         DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a._registered["registered"] = True
-        a._registered["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        a._node_data["registered"] = False
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        a.aggregator = "http://example.com"
 
-        def killloop(*args, **kwargs):
-            a._running = False
+        def request(*args, **kwargs):
+            return mock.MagicMock(status_code=200, headers={'Location': 'path/xxx'})
 
-        with mock.patch('gevent.sleep', side_effect=killloop):
-            with mock.patch.object(a, '_process_reregister') as procreg:
-                with mock.patch.object(a, '_SEND') as SEND:
-                    a._heartbeat_thread()
+        with mock.patch.object(a, '_send', side_effect=request) as send:
+            with mock.patch.object(a, '_unregister_node', return_value=False) as un_reg:
+                return_val = a._heartbeat_operation()
 
-                    procreg.assert_not_called()
-                    SEND.assert_called_with("POST", "/health/nodes/" + DUMMYNODEID)
+                self.assertFalse(return_val)
+                send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
+                                        "/health/nodes/{}".format(DUMMYNODEID))
+                a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+                un_reg.assert_called_once_with('path/xxx')
+
+    def test_heartbeat_operation_409(self):
+        """Test heartbeat operation when heartbeat request returns HTTP 409
+        After HTTP 409 heartbeat, Node should unregister Node then perform re-registration with same aggregator"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = True
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        a.aggregator = "http://example.com"
+
+        def request(*args, **kwargs):
+            return mock.MagicMock(status_code=409, headers={'Location': 'path/xxx'})
+
+        with mock.patch.object(a, '_send', side_effect=request) as send:
+            with mock.patch.object(a, '_unregister_node', return_value=True) as un_reg:
+                with mock.patch.object(a, '_register_node', return_value=True) as register:
+                    return_val = a._heartbeat_operation()
+
+                    self.assertTrue(return_val)
+                    send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
+                                            "/health/nodes/{}".format(DUMMYNODEID))
                     a._mdns_updater.inc_P2P_enable_count.assert_not_called()
-                    self.assertTrue(a._registered["registered"])
+                    un_reg.assert_called_once_with('path/xxx')
+                    register.assert_called_once_with()
 
-    def test_heartbeat_with_404_exception(self):
-        """If the heartbeat returns a 404 exception then the object should reset to unregistered state and increment
-        the P2P enable counter."""
+    def test_heartbeat_operation_409_failure(self):
+        """Test heartbeat operation when heartbeat request returns HTTP 409 and aggregator in failed state
+        After HTTP 409 heartbeat, Node should attempt to unregister Node and return"""
         DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a._registered["registered"] = True
-        a._registered["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        a._node_data["registered"] = True
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        a.aggregator = "http://example.com"
 
-        def killloop(*args, **kwargs):
-            a._running = False
+        def request(*args, **kwargs):
+            return mock.MagicMock(status_code=409, headers={'Location': 'path/xxx'})
 
-        with mock.patch('gevent.sleep', side_effect=killloop):
-            with mock.patch.object(a, '_process_reregister') as procreg:
-                with mock.patch.object(a, '_SEND', side_effect=InvalidRequest(status_code=404)) as SEND:
-                    a._heartbeat_thread()
+        with mock.patch.object(a, '_send', side_effect=request) as send:
+            with mock.patch.object(a, '_unregister_node', return_value=False) as un_reg:
+                return_val = a._heartbeat_operation()
 
-                    procreg.assert_not_called()
-                    SEND.assert_called_with("POST", "/health/nodes/" + DUMMYNODEID)
-                    a._mdns_updater.inc_P2P_enable_count.assert_called_with()
-                    self.assertFalse(a._registered["registered"])
+                self.assertFalse(return_val)
+                send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
+                                        "/health/nodes/{}".format(DUMMYNODEID))
+                a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+                un_reg.assert_called_once_with('path/xxx')
 
-    def test_heartbeat_with_500_exception(self):
-        """If the heartbeat returns a 500 exception from all aggregators then the heartbeat should backoff"""
+    def test_heartbeat_operation_404(self):
+        """Test heartbeat operation when heartbeat request returns HTTP 404
+        After HTTP 404, Node should mark itself as not registered and attempt re-registration"""
         DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a._registered["registered"] = True
-        a._registered["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        a._node_data["registered"] = True
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        a.aggregator = "http://example.com"
 
-        def killloop(*args, **kwargs):
-            a._running = False
+        with mock.patch.object(a, '_send', side_effect=InvalidRequest(status_code=404)) as send:
+            with mock.patch.object(a, '_register_node', return_value=True) as register:
+                return_val = a._heartbeat_operation()
 
-        with mock.patch('gevent.sleep', side_effect=killloop):
-            with mock.patch.object(a, '_process_reregister') as procreg:
-                with mock.patch.object(a, '_SEND', side_effect=EndOfAggregatorList) as SEND:
-                    a._heartbeat_thread()
+                self.assertTrue(return_val)
+                send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
+                                        "/health/nodes/{}".format(DUMMYNODEID))
+                a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+                register.assert_called_once_with()
+                self.assertFalse(a._node_data["registered"])
 
-                    procreg.assert_not_called()
-                    SEND.assert_called_with("POST", "/health/nodes/" + DUMMYNODEID)
-                    a._mdns_updater.inc_P2P_enable_count.assert_not_called()
-                    self.mocks['gevent.spawn'].assert_called_with(a._backoff_timer_thread)
-
-    def test_heartbeat_with_other_exception(self):
-        """If an unknown exception is raised during the heartbeat process then the object should reset to unregistered
-        state but not increment the P2P enable counter."""
+    def test_heartbeat_operation_404_failure(self):
+        """Test heartbeat operation when heartbeat request returns HTTP 404 and aggregator in failed state
+        after HTTP 404, Node should mark itself as not registered and attempt re-registration"""
         DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a._registered["registered"] = True
-        a._registered["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        a._node_data["registered"] = True
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        a.aggregator = "http://example.com"
 
-        def killloop(*args, **kwargs):
-            a._running = False
+        with mock.patch.object(a, '_send', side_effect=InvalidRequest(status_code=404)) as send:
+            with mock.patch.object(a, '_register_node', return_value=False) as register:
+                return_val = a._heartbeat_operation()
 
-        with mock.patch('gevent.sleep', side_effect=killloop):
-            with mock.patch.object(a, '_process_reregister') as procreg:
-                with mock.patch.object(a, '_SEND', side_effect=Exception) as SEND:
-                    a._heartbeat_thread()
+                self.assertFalse(return_val)
+                send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
+                                        "/health/nodes/{}".format(DUMMYNODEID))
+                a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+                register.assert_called_once_with()
+                self.assertFalse(a._node_data["registered"])
 
-                    procreg.assert_not_called()
-                    SEND.assert_called_with("POST", "/health/nodes/" + DUMMYNODEID)
-                    a._mdns_updater.inc_P2P_enable_count.assert_not_called()
-                    self.assertFalse(a._registered["registered"])
-
-    def test_heartbeat_when_backoff_active(self):
-        """When backoff flag active, heartbeat should not send any heartbeats and loop should sleep"""
+    def test_heartbeat_operation_4xx_failure(self):
+        """Test heartbeat operation when heartbeat request returns HTTP 4xx and aggregator in failed state
+        Indicates aggregator has encountered an error, heartbeat should fail and next aggregator should be used"""
         DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a._registered["registered"] = True
-        a._registered["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
-        a._backoff_active = True
+        a._node_data["registered"] = True
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        a.aggregator = "http://example.com"
 
-        with mock.patch('gevent.sleep', side_effect=Exception("Ignore it... just close thread")):
-            with mock.patch.object(a, '_SEND') as SEND:
-                with self.assertRaises(Exception):
-                    a._heartbeat_thread()
-                SEND.assert_not_called()
+        with mock.patch.object(a, '_send', side_effect=InvalidRequest(status_code=401)) as send:
+            return_val = a._heartbeat_operation()
+
+            self.assertFalse(return_val)
+            send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
+                                    "/health/nodes/{}".format(DUMMYNODEID))
+            a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+            self.assertTrue(a._node_data["registered"])
+
+    def test_heartbeat_operation_5xx_failure(self):
+        """Test heartbeat operation when heartbeat request returns HTTP 5xx and aggregator in failed state
+        Indicates aggregator has encountered an error, heartbeat should fail and next aggregator should be used"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = True
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        a.aggregator = "http://example.com"
+
+        with mock.patch.object(a, '_send', side_effect=ServerSideError) as send:
+            return_val = a._heartbeat_operation()
+
+            self.assertFalse(return_val)
+            send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
+                                    "/health/nodes/{}".format(DUMMYNODEID))
+            a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+            self.assertTrue(a._node_data["registered"])
+
+    def test_heartbeat_operation_exception_failure(self):
+        """Test heartbeat operation when heartbeat request returns an Exception
+        Indicates aggregator has encountered an error, heartbeat should fail and next aggregator should be used"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = True
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        a.aggregator = "http://example.com"
+
+        with mock.patch.object(a, '_send', side_effect=Exception) as send:
+            return_val = a._heartbeat_operation()
+
+            self.assertFalse(return_val)
+            send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
+                                    "/health/nodes/{}".format(DUMMYNODEID))
+            a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+            self.assertFalse(a._node_data["registered"])
+
+    def test_heartbeat_operation_if_no_aggregator_set(self):
+        """Test heartbeat operation when no aggregator set
+        No heartbeat should be performed and should return False"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = True
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        a.aggregator = None
+
+        with mock.patch.object(a, '_send', side_effect=Exception) as send:
+            return_val = a._heartbeat_operation()
+
+            self.assertFalse(return_val)
+            send.assert_not_called()
+            a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+            self.assertTrue(a._node_data["registered"])
+
+    # # ================================================================================================================
+    # # Test discovery operation
+    # # ================================================================================================================
+
+    def test_discovery_under_normal_operation(self):
+        """Test the discovery correctly registers node with aggregator and heartbeats"""
+        BACKOFF_PERIOD = 4
+        AGGREGATOR_1 = "http://example1.com"
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = False
+        a.aggregator = None
+        a._aggregator_list_stale = True
+        a._backoff_period = BACKOFF_PERIOD
+
+        a.mdnsbridge.getHrefWithException.return_value = AGGREGATOR_1
+
+        with mock.patch('gevent.sleep') as sleep:
+            with mock.patch.object(a, '_heartbeat_operation', return_value=True) as heartbeat:
+                a._discovery_operation()
+
+                sleep.assert_called_once_with(BACKOFF_PERIOD)
+                a.mdnsbridge.updateServices.assert_called_once_with(LEGACY_REG_MDNSTYPE)
+                heartbeat.assert_called_once_with()
+                self.assertFalse(a._backoff_active)
+                self.assertFalse(a._aggregator_list_stale)
+                self.assertEqual(a.aggregator, AGGREGATOR_1)
                 a._mdns_updater.inc_P2P_enable_count.assert_not_called()
 
-    def test_process_queue_does_nothing_when_not_registered(self):
-        """The queue processing thread should not SEND any messages when the node is not registered."""
+    def test_discovery_when_aggregator_failure_flag_set(self):
+        """Test the discovery correctly registers node with aggregator and heartbeats,
+        but does not when for backoff period"""
+        AGGREGATOR_1 = "http://example1.com"
+
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a._registered["registered"] = False
+        a._node_data["registered"] = False
+        a.aggregator = None
+        a._aggregator_list_stale = True
+        a._aggregator_failure = True
+
+        a.mdnsbridge.getHrefWithException.return_value = AGGREGATOR_1
+
+        with mock.patch('gevent.sleep') as sleep:
+            with mock.patch.object(a, '_heartbeat_operation', return_value=True) as heartbeat:
+                a._discovery_operation()
+
+                sleep.assert_not_called()
+                a.mdnsbridge.updateServices.assert_called_once_with(LEGACY_REG_MDNSTYPE)
+                heartbeat.assert_called_once_with()
+                self.assertFalse(a._backoff_active)
+                self.assertFalse(a._aggregator_list_stale)
+                self.assertEqual(a.aggregator, AGGREGATOR_1)
+                a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+
+    def test_discovery_when_no_aggregator_returned(self):
+        """Test the discovery returns when no aggregators found and does not attempt registration"""
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = False
+        a.aggregator = None
+        a._aggregator_list_stale = True
+        a._aggregator_failure = True
+
+        a.mdnsbridge.getHrefWithException.side_effect = NoService
+
+        with mock.patch('gevent.sleep') as sleep:
+            with mock.patch.object(a, '_heartbeat_operation', return_value=True) as heartbeat:
+                a._discovery_operation()
+
+                sleep.assert_not_called()
+                a.mdnsbridge.updateServices.assert_called_once_with(LEGACY_REG_MDNSTYPE)
+                heartbeat.assert_not_called()
+                self.assertFalse(a._backoff_active)
+                self.assertTrue(a._aggregator_list_stale)
+                self.assertEqual(a.aggregator, None)
+                a._mdns_updater.inc_P2P_enable_count.assert_called_once_with()
+                self.assertEqual(a._backoff_period, BACKOFF_INITIAL_TIMOUT_SECONDS)
+
+    def test_discovery_when_end_of_list_returned(self):
+        """Test the discovery returns when end of aggregator list reached and does not attempt registration"""
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = False
+        a.aggregator = None
+        a._aggregator_list_stale = True
+        a._aggregator_failure = True
+
+        a.mdnsbridge.getHrefWithException.side_effect = EndOfServiceList
+
+        with mock.patch('gevent.sleep') as sleep:
+            with mock.patch.object(a, '_heartbeat_operation', return_value=True) as heartbeat:
+                a._discovery_operation()
+
+                sleep.assert_not_called()
+                a.mdnsbridge.updateServices.assert_called_once_with(LEGACY_REG_MDNSTYPE)
+                heartbeat.assert_not_called()
+                self.assertFalse(a._backoff_active)
+                self.assertTrue(a._aggregator_list_stale)
+                self.assertEqual(a.aggregator, None)
+                a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+                self.assertEqual(a._backoff_period, BACKOFF_INITIAL_TIMOUT_SECONDS)
+
+    def test_discovery_when_heartbeat_fails(self):
+        """Test that discovery uses tries multiple aggregators before returning"""
+        AGGREGATOR_1 = "http://example1.com"
+        AGGREGATOR_2 = "http://example2.com"
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = False
+        a.aggregator = None
+        a._aggregator_list_stale = True
+
+        a.mdnsbridge.getHrefWithException.side_effect = [AGGREGATOR_1, AGGREGATOR_2]
+
+        with mock.patch('gevent.sleep'):
+            with mock.patch.object(a, '_heartbeat_operation', side_effect=[False, True]) as heartbeat:
+                a._discovery_operation()
+
+                a.mdnsbridge.updateServices.assert_called_once_with(LEGACY_REG_MDNSTYPE)
+                heartbeat.assert_called_with()
+                self.assertFalse(a._backoff_active)
+                self.assertFalse(a._aggregator_list_stale)
+                self.assertEqual(a.aggregator, AGGREGATOR_2)
+                a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+
+    # # ================================================================================================================
+    # # Test registered operation
+    # # ================================================================================================================
+
+    def test_registered_operation_under_normal_operation(self):
+        """Test the registered operation correctly heartbeats"""
+        AGGREGATOR_1 = "http://example1.com"
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = False
+        a.aggregator = AGGREGATOR_1
+
+        with mock.patch.object(a, '_heartbeat_operation', return_value=True) as heartbeat:
+            a._registered_operation()
+
+            heartbeat.assert_called_once_with()
+            self.assertFalse(a._backoff_active)
+            self.assertFalse(a._aggregator_failure)
+            self.assertEqual(a.aggregator, AGGREGATOR_1)
+            a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+
+    def test_registered_operation_when_heartbeat_fails(self):
+        """Test the registered operation when the heartbeat fails"""
+        AGGREGATOR_1 = "http://example1.com"
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = False
+        a.aggregator = AGGREGATOR_1
+
+        with mock.patch.object(a, '_heartbeat_operation', return_value=False) as heartbeat:
+            a._registered_operation()
+
+            heartbeat.assert_called_once_with()
+            self.assertFalse(a._backoff_active)
+            self.assertTrue(a._aggregator_failure)
+            self.assertEqual(a.aggregator, None)
+            a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+
+    # # ================================================================================================================
+    # # Test _register_node
+    # # ================================================================================================================
+
+    def test_register_node_under_normal_operation(self):
+        """Test that the Node correctly registers with aggregator"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        AGGREGATOR_1 = "http://example1.com"
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = False
+        a.aggregator = AGGREGATOR_1
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+
+        def request(*args, **kwargs):
+            return mock.MagicMock(status_code=201)
+
+        with mock.patch.object(a, '_send', side_effect=request) as send:
+            with mock.patch.object(a, '_register_node_resources') as reg_resources:
+                return_val = a._register_node()
+
+                self.assertTrue(return_val)
+                send.assert_called_once_with("POST", AGGREGATOR_1, a.aggregator_apiversion,
+                                             "/resource", a._node_data["node"])
+                reg_resources.assert_called_once_with()
+                self.assertFalse(a._backoff_active)
+                self.assertTrue(a._aggregator_list_stale)
+                self.assertTrue(a._node_data['registered'])
+                a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+
+    def test_register_node_when_no_node_data(self):
+        """Test that is there is no data the registration fails"""
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = False
+
+        with mock.patch.object(a, '_send') as send:
+            with mock.patch.object(a, '_register_node_resources') as reg_resources:
+                return_val = a._register_node()
+
+                self.assertFalse(return_val)
+                send.assert_not_called()
+                reg_resources.assert_not_called()
+                self.assertFalse(a._backoff_active)
+                self.assertTrue(a._aggregator_list_stale)
+                self.assertFalse(a._node_data['registered'])
+                a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+
+    def test_register_node_response_200(self):
+        """Test that the Node correctly un-registers with aggregator when HTTP 200 response received"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        AGGREGATOR_1 = "http://example1.com"
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = False
+        a.aggregator = AGGREGATOR_1
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+
+        request_list = [
+            mock.MagicMock(status_code=200, headers={'Location': 'path/xxx'}),
+            mock.MagicMock(status_code=201),
+        ]
+
+        with mock.patch.object(a, '_send', side_effect=request_list) as send:
+            with mock.patch.object(a, '_unregister_node', return_value=True) as un_reg:
+                with mock.patch.object(a, '_register_node_resources') as reg_resources:
+                    return_val = a._register_node()
+
+                    self.assertTrue(return_val)
+                    send.assert_called_with("POST", AGGREGATOR_1, a.aggregator_apiversion,
+                                                "/resource", a._node_data["node"])
+                    un_reg.assert_called_once_with('path/xxx')
+                    reg_resources.assert_called_once_with()
+                    self.assertFalse(a._backoff_active)
+                    self.assertTrue(a._aggregator_list_stale)
+                    self.assertTrue(a._node_data['registered'])
+                    a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+
+    def test_register_node_response_409(self):
+        """Test that the Node correctly un-registers with aggregator when HTTP 409 response received"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        AGGREGATOR_1 = "http://example1.com"
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = False
+        a.aggregator = AGGREGATOR_1
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+
+        request_list = [
+            mock.MagicMock(status_code=409, headers={'Location': 'path/xxx'}),
+            mock.MagicMock(status_code=201),
+        ]
+
+        with mock.patch.object(a, '_send', side_effect=request_list) as send:
+            with mock.patch.object(a, '_unregister_node', return_value=True) as un_reg:
+                with mock.patch.object(a, '_register_node_resources') as reg_resources:
+                    return_val = a._register_node()
+
+                    self.assertTrue(return_val)
+                    send.assert_called_with("POST", AGGREGATOR_1, a.aggregator_apiversion,
+                                            "/resource", a._node_data["node"])
+                    un_reg.assert_called_once_with('path/xxx')
+                    reg_resources.assert_called_once_with()
+                    self.assertFalse(a._backoff_active)
+                    self.assertTrue(a._aggregator_list_stale)
+                    self.assertTrue(a._node_data['registered'])
+                    a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+
+    def test_register_node_response_Exception(self):
+        """Test that the Node correctly handles Exception during registration"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        AGGREGATOR_1 = "http://example1.com"
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = False
+        a.aggregator = AGGREGATOR_1
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+
+        with mock.patch.object(a, '_send', side_effect=Exception) as send:
+            return_val = a._register_node()
+
+            self.assertFalse(return_val)
+            send.assert_called_with("POST", AGGREGATOR_1, a.aggregator_apiversion,
+                                        "/resource", a._node_data["node"])
+            self.assertFalse(a._backoff_active)
+            self.assertFalse(a._node_data['registered'])
+            a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+
+    def test_register_node_response_if_un_registration_fails(self):
+        """Test that the Node correctly handles a failure during un-registration"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        AGGREGATOR_1 = "http://example1.com"
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = False
+        a.aggregator = AGGREGATOR_1
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+
+        request_response = [
+            mock.MagicMock(status_code=409, headers={'Location': 'path/xxx'})
+        ]
+
+        with mock.patch.object(a, '_send', side_effect=request_response) as send:
+            with mock.patch.object(a, '_unregister_node', return_value=False) as un_reg:
+
+                return_val = a._register_node()
+
+                self.assertFalse(return_val)
+                send.assert_called_with("POST", AGGREGATOR_1, a.aggregator_apiversion,
+                                            "/resource", a._node_data["node"])
+                un_reg.assert_called_once_with('path/xxx')
+                self.assertFalse(a._backoff_active)
+                self.assertFalse(a._node_data['registered'])
+                a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+
+    def test_register_node_drains_queue(self):
+        """Test that the register Node drains the queue before registration"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        AGGREGATOR_1 = "http://example1.com"
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = False
+        a.aggregator = AGGREGATOR_1
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+
+        request_response = [
+            mock.MagicMock(status_code=201)
+        ]
+
+        queue = [
+            {"method": "POST",   "namespace": "resource", "res_type": "dummy", "key": DUMMYNODEID},
+            {"method": "DELETE", "namespace": "resource", "res_type": "dummy", "key": DUMMYNODEID}
+            ]
+
+        a._reg_queue.empty.side_effect = lambda: (len(queue) == 0)
+
+        def _get(block=True):
+            if len(queue) == 0:
+                raise gevent.queue.Queue.Empty
+            return queue.pop(0)
+        a._reg_queue.get.side_effect = _get
+
+        with mock.patch.object(a, '_send', side_effect=request_response) as send:
+            with mock.patch.object(a, '_register_node_resources') as reg_resources:
+                return_val = a._register_node()
+
+                self.assertTrue(return_val)
+                send.assert_called_with("POST", AGGREGATOR_1, a.aggregator_apiversion,
+                                            "/resource", a._node_data["node"])
+                reg_resources.assert_called_once_with()
+                self.assertFalse(a._backoff_active)
+                self.assertTrue(a._node_data['registered'])
+                a._mdns_updater.inc_P2P_enable_count.assert_not_called()
+
+    # # ================================================================================================================
+    # # Test _unregister_node
+    # # ================================================================================================================
+
+    def test_unregister_node_under_normal_operation(self):
+        """Test that the Node correctly unregisters with aggregator"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        AGGREGATOR_1 = "http://example1.com:234"
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = True
+        a.aggregator = AGGREGATOR_1
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+
+        def request(*args, **kwargs):
+            return mock.MagicMock(status_code=204)
+
+        # No URL Path
+        with mock.patch.object(a, '_send', side_effect=request) as send:
+            return_val = a._unregister_node(None)
+
+            self.assertTrue(return_val)
+            send.assert_called_once_with("DELETE", AGGREGATOR_1, a.aggregator_apiversion,
+                                         "/resource/nodes/{}".format(DUMMYNODEID))
+            self.assertFalse(a._node_data['registered'])
+
+        # Relative URL
+        a._node_data["registered"] = True
+        with mock.patch.object(a, '_send_request', side_effect=request) as send:
+            return_val = a._unregister_node('/path/xxx')
+
+            self.assertTrue(return_val)
+            send.assert_called_once_with("DELETE", AGGREGATOR_1, '/path/xxx')
+            self.assertFalse(a._node_data['registered'])
+
+        # Absolute URL
+        a._node_data["registered"] = True
+        with mock.patch.object(a, '_send_request', side_effect=request) as send:
+            return_val = a._unregister_node(AGGREGATOR_1 + '/path/xxx')
+
+            self.assertTrue(return_val)
+            send.assert_called_once_with("DELETE", AGGREGATOR_1, '/path/xxx')
+            self.assertFalse(a._node_data['registered'])
+
+    def test_unregister_node_unexpected_response(self):
+        """Test that the Node returns False when DELETE returns an unexpected response"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        AGGREGATOR_1 = "http://example1.com"
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = True
+        a.aggregator = AGGREGATOR_1
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+
+        def request(*args, **kwargs):
+            return mock.MagicMock(status_code=200)
+
+        with mock.patch.object(a, '_send', side_effect=request) as send:
+            return_val = a._unregister_node(None)
+
+            self.assertFalse(return_val)
+            send.assert_called_once_with("DELETE", AGGREGATOR_1, a.aggregator_apiversion,
+                                         "/resource/nodes/{}".format(DUMMYNODEID))
+            self.assertFalse(a._node_data['registered'])
+
+    def test_unregister_node_Exception(self):
+        """Test that the Node returns False when Exception raise during DELETE"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        AGGREGATOR_1 = "http://example1.com"
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = True
+        a.aggregator = AGGREGATOR_1
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+
+        with mock.patch.object(a, '_send', side_effect=Exception) as send:
+            return_val = a._unregister_node(None)
+
+            self.assertFalse(return_val)
+            send.assert_called_once_with("DELETE", AGGREGATOR_1, a.aggregator_apiversion,
+                                         "/resource/nodes/{}".format(DUMMYNODEID))
+            self.assertFalse(a._node_data['registered'])
+
+    # # ================================================================================================================
+    # # Test _register_node_resources
+    # # ================================================================================================================
+
+    def test_register_node_resources_under_normal_operation(self):
+        """Test that the Node correctly queues resources to be registered with aggregator"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        DUMMYKEY = "dummykey"
+        DUMMYPARAMKEY = "dummyparamkey"
+        DUMMYPARAMVAL = "dummyparamval"
+        DUMMYFLOW = "dummyflow"
+        DUMMYDEVICE = "dummydevice"
+        AGGREGATOR_1 = "http://example1.com"
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = True
+        a.aggregator = AGGREGATOR_1
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        if "entities" not in a._node_data:
+            a._node_data["entities"] = {}
+        if "resource" not in a._node_data["entities"]:
+            a._node_data["entities"]["resource"] = {}
+        if "dummy" not in a._node_data["entities"]["resource"]:
+            a._node_data["entities"]["resource"]["dummy"] = {}
+        if "device" not in a._node_data["entities"]["resource"]:
+            a._node_data["entities"]["resource"]["device"] = {}
+        if "flow" not in a._node_data["entities"]["resource"]:
+            a._node_data["entities"]["resource"]["flow"] = {}
+        a._node_data["entities"]["resource"]["dummy"][DUMMYKEY]     = {DUMMYPARAMKEY: DUMMYPARAMVAL}
+        a._node_data["entities"]["resource"]["device"][DUMMYDEVICE] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
+        a._node_data["entities"]["resource"]["flow"][DUMMYFLOW]     = {DUMMYPARAMKEY: DUMMYPARAMVAL}
+
+        expected_put_calls = []
+        # The re-registration of the other resources should be queued for the next run loop, and arranged in order
+        expected_put_calls = (
+            sum([
+                [mock.call({"method": "POST",   "namespace": "resource", "res_type": res_type, "key": key})
+                    for key in a._node_data["entities"]["resource"][res_type]]
+                        for res_type in a.registration_order if res_type in a._node_data["entities"]["resource"]
+                ], []) +
+            sum([
+                [mock.call({"method": "POST",   "namespace": "resource", "res_type": res_type, "key": key})
+                    for key in a._node_data["entities"]["resource"][res_type]]
+                        for res_type in a._node_data["entities"]["resource"] if res_type not in a.registration_order
+                ], [])
+            )
+
+        a._register_node_resources()
+        self.assertListEqual(a._reg_queue.put.mock_calls, expected_put_calls)
+
+    # # ================================================================================================================
+    # # Test queue handelling
+    # # ================================================================================================================
+
+    def test_process_queue_does_nothing_when_not_registered(self):
+        """The queue processing thread should not send any messages when the node is not registered."""
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = False
         a._reg_queue.empty.return_value = False
 
         def killloop(*args, **kwargs):
             a._running = False
 
         with mock.patch('gevent.sleep', side_effect=killloop) as sleep:
-            with mock.patch.object(a, '_SEND') as SEND:
+            with mock.patch.object(a, '_send') as send:
                 a._process_queue()
 
-                SEND.assert_not_called()
+                send.assert_not_called()
                 a._mdns_updater.P2P_disable.assert_not_called()
                 sleep.assert_called_with(mock.ANY)
 
     def test_process_queue_does_nothing_when_queue_empty(self):
-        """The queue processing thread should not SEND any messages when the queue is empty."""
+        """The queue processing thread should not send any messages when the queue is empty."""
         DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a._registered["registered"] = True
-        a._registered["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        a._node_data["registered"] = True
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
         a._reg_queue.empty.return_value = True
 
         def killloop(*args, **kwargs):
             a._running = False
 
         with mock.patch('gevent.sleep', side_effect=killloop) as sleep:
-            with mock.patch.object(a, '_SEND') as SEND:
+            with mock.patch.object(a, '_send') as send:
                 a._process_queue()
 
-                SEND.assert_not_called()
+                send.assert_not_called()
                 a._mdns_updater.P2P_disable.assert_not_called()
                 sleep.assert_called_with(mock.ANY)
 
     def test_process_queue_processes_queue_when_running(self):
-        """The queue processing thread should check the queue and SEND a registration/deregistration request
+        """The queue processing thread should check the queue and send a registration/deregistration request
         to the remote aggregator when required."""
         DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
         DUMMYKEY = "dummykey"
@@ -339,15 +1047,16 @@ class TestAggregator(unittest.TestCase):
         DUMMYPARAMVAL = "dummyparamval"
 
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a._registered["registered"] = True
-        a._registered["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
-        if "entities" not in a._registered:
-            a._registered["entities"] = {}
-        if "resource" not in a._registered["entities"]:
-            a._registered["entities"]["resource"] = {}
-        if "dummy" not in a._registered["entities"]["resource"]:
-            a._registered["entities"]["resource"]["dummy"] = {}
-        a._registered["entities"]["resource"]["dummy"][DUMMYKEY] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
+        a.aggregator = "www.example.com"
+        a._node_data["registered"] = True
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        if "entities" not in a._node_data:
+            a._node_data["entities"] = {}
+        if "resource" not in a._node_data["entities"]:
+            a._node_data["entities"]["resource"] = {}
+        if "dummy" not in a._node_data["entities"]["resource"]:
+            a._node_data["entities"]["resource"]["dummy"] = {}
+        a._node_data["entities"]["resource"]["dummy"][DUMMYKEY] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
 
         queue = [
             {"method": "POST", "namespace": "resource", "res_type": "node", "key": DUMMYNODEID},
@@ -359,21 +1068,20 @@ class TestAggregator(unittest.TestCase):
         a._reg_queue.get.side_effect = lambda: queue.pop(0)
 
         expected_calls = [
-            mock.call('POST', '/resource', a._registered["node"]),
-            mock.call('POST', '/health/nodes/' + DUMMYNODEID),
-            mock.call('POST', '/resource', a._registered["entities"]["resource"]["dummy"][DUMMYKEY]),
-            mock.call('DELETE', '/resource/dummys/' + DUMMYKEY)
+            mock.call('POST', "www.example.com", "v1.2", '/resource',
+                      a._node_data["entities"]["resource"]["dummy"][DUMMYKEY]),
+            mock.call('DELETE', "www.example.com", "v1.2", '/resource/dummys/' + DUMMYKEY)
             ]
 
         def killloop(*args, **kwargs):
             a._running = False
 
         with mock.patch('gevent.sleep', side_effect=killloop):
-            with mock.patch.object(a, '_SEND') as SEND:
-                a._process_queue()
-
-                SEND.assert_has_calls(expected_calls)
-                a._mdns_updater.P2P_disable.assert_called_with()
+            with mock.patch.object(a, '_register_node') as register:
+                with mock.patch.object(a, '_send') as send:
+                    a._process_queue()
+                    register.assert_called_once_with()
+                    send.assert_has_calls(expected_calls)
 
     def test_process_queue_processes_queue_when_not_running(self):
         """The process queue method should continue until the queue is empty even if the object has been instructed
@@ -385,15 +1093,16 @@ class TestAggregator(unittest.TestCase):
 
         a = Aggregator(mdns_updater=mock.MagicMock())
         a._running = False
-        a._registered["registered"] = True
-        a._registered["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
-        if "entities" not in a._registered:
-            a._registered["entities"] = {}
-        if "resource" not in a._registered["entities"]:
-            a._registered["entities"]["resource"] = {}
-        if "dummy" not in a._registered["entities"]["resource"]:
-            a._registered["entities"]["resource"]["dummy"] = {}
-        a._registered["entities"]["resource"]["dummy"][DUMMYKEY] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
+        a.aggregator = "www.example.com"
+        a._node_data["registered"] = True
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        if "entities" not in a._node_data:
+            a._node_data["entities"] = {}
+        if "resource" not in a._node_data["entities"]:
+            a._node_data["entities"]["resource"] = {}
+        if "dummy" not in a._node_data["entities"]["resource"]:
+            a._node_data["entities"]["resource"]["dummy"] = {}
+        a._node_data["entities"]["resource"]["dummy"][DUMMYKEY] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
 
         queue = [
             {"method": "POST", "namespace": "resource", "res_type": "node", "key": DUMMYNODEID},
@@ -405,62 +1114,22 @@ class TestAggregator(unittest.TestCase):
         a._reg_queue.get.side_effect = lambda: queue.pop(0)
 
         expected_calls = [
-            mock.call('POST', '/resource', a._registered["node"]),
-            mock.call('POST', '/health/nodes/' + DUMMYNODEID),
-            mock.call('POST', '/resource', a._registered["entities"]["resource"]["dummy"][DUMMYKEY]),
-            mock.call('DELETE', '/resource/dummys/' + DUMMYKEY)
+            mock.call('POST', "www.example.com", "v1.2", '/resource',
+                      a._node_data["entities"]["resource"]["dummy"][DUMMYKEY]),
+            mock.call('DELETE', "www.example.com", "v1.2", '/resource/dummys/' + DUMMYKEY)
             ]
 
         with mock.patch('gevent.sleep', side_effect=Exception) as sleep:
-            with mock.patch.object(a, '_SEND') as SEND:
-                try:
-                    a._process_queue()
-                except Exception:
-                    self.fail(msg="process_queue kept running")
+            with mock.patch.object(a, '_register_node') as register:
+                with mock.patch.object(a, '_send') as send:
+                    try:
+                        a._process_queue()
+                    except Exception:
+                        self.fail(msg="process_queue kept running")
 
-                SEND.assert_has_calls(expected_calls)
-                a._mdns_updater.P2P_disable.assert_called_with()
-                sleep.assert_not_called()
-
-    def test_process_queue_processes_queue_when_running_and_aborts_on_exception_in_node_register(self):
-        """If a node register performed by the queue processing thread throws an exception then the loop
-        should abort."""
-        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
-        DUMMYKEY = "dummykey"
-        DUMMYPARAMKEY = "dummyparamkey"
-        DUMMYPARAMVAL = "dummyparamval"
-
-        a = Aggregator(mdns_updater=mock.MagicMock())
-        a._registered["registered"] = True
-        a._registered["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
-        if "entities" not in a._registered:
-            a._registered["entities"] = {}
-        if "resource" not in a._registered["entities"]:
-            a._registered["entities"]["resource"] = {}
-        if "dummy" not in a._registered["entities"]["resource"]:
-            a._registered["entities"]["resource"]["dummy"] = {}
-        a._registered["entities"]["resource"]["dummy"][DUMMYKEY] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
-
-        queue = [
-            {"method": "POST", "namespace": "resource", "res_type": "node", "key": DUMMYNODEID},
-            ]
-
-        a._reg_queue.empty.side_effect = lambda: (len(queue) == 0)
-        a._reg_queue.get.side_effect = lambda: queue.pop(0)
-
-        expected_calls = [
-            mock.call('POST', '/resource', a._registered["node"]),
-            ]
-
-        def killloop(*args, **kwargs):
-            a._running = False
-
-        with mock.patch('gevent.sleep', side_effect=killloop):
-            with mock.patch.object(a, '_SEND', side_effect=Exception) as SEND:
-                a._process_queue()
-
-                SEND.assert_has_calls(expected_calls)
-                a._mdns_updater.P2P_disable.assert_not_called()
+                    send.assert_has_calls(expected_calls)
+                    register.assert_called_once_with()
+                    sleep.assert_not_called()
 
     def test_process_queue_processes_queue_when_running_and_aborts_on_exception_in_general_register(self):
         """If a non-node register performed by the queue processing thread throws an exception then the loop
@@ -471,15 +1140,16 @@ class TestAggregator(unittest.TestCase):
         DUMMYPARAMVAL = "dummyparamval"
 
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a._registered["registered"] = True
-        a._registered["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
-        if "entities" not in a._registered:
-            a._registered["entities"] = {}
-        if "resource" not in a._registered["entities"]:
-            a._registered["entities"]["resource"] = {}
-        if "dummy" not in a._registered["entities"]["resource"]:
-            a._registered["entities"]["resource"]["dummy"] = {}
-        a._registered["entities"]["resource"]["dummy"][DUMMYKEY] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
+        a.aggregator = "www.example.com"
+        a._node_data["registered"] = True
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        if "entities" not in a._node_data:
+            a._node_data["entities"] = {}
+        if "resource" not in a._node_data["entities"]:
+            a._node_data["entities"]["resource"] = {}
+        if "dummy" not in a._node_data["entities"]["resource"]:
+            a._node_data["entities"]["resource"]["dummy"] = {}
+        a._node_data["entities"]["resource"]["dummy"][DUMMYKEY] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
 
         queue = [
             {"method": "POST", "namespace": "resource", "res_type": "dummy", "key": DUMMYKEY},
@@ -489,19 +1159,20 @@ class TestAggregator(unittest.TestCase):
         a._reg_queue.get.side_effect = lambda: queue.pop(0)
 
         expected_calls = [
-            mock.call('POST', '/resource', a._registered["entities"]["resource"]["dummy"][DUMMYKEY]),
+            mock.call('POST', "www.example.com", "v1.2", '/resource',
+                      a._node_data["entities"]["resource"]["dummy"][DUMMYKEY]),
             ]
 
         def killloop(*args, **kwargs):
             a._running = False
 
         with mock.patch('gevent.sleep', side_effect=killloop):
-            with mock.patch.object(a, '_SEND', side_effect=InvalidRequest) as SEND:
+            with mock.patch.object(a, '_send', side_effect=InvalidRequest) as send:
                 a._process_queue()
 
-                SEND.assert_has_calls(expected_calls)
+                send.assert_has_calls(expected_calls)
                 a._mdns_updater.P2P_disable.assert_not_called()
-                self.assertNotIn(DUMMYKEY, a._registered["entities"]["resource"]["dummy"])
+                self.assertNotIn(DUMMYKEY, a._node_data["entities"]["resource"]["dummy"])
 
     def test_process_queue_processes_queue_when_running_and_aborts_on_exception_in_general_unregister(self):
         """If an unregister performed by the queue processing thread throws an exception then the loop should abort."""
@@ -511,15 +1182,16 @@ class TestAggregator(unittest.TestCase):
         DUMMYPARAMVAL = "dummyparamval"
 
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a._registered["registered"] = True
-        a._registered["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
-        if "entities" not in a._registered:
-            a._registered["entities"] = {}
-        if "resource" not in a._registered["entities"]:
-            a._registered["entities"]["resource"] = {}
-        if "dummy" not in a._registered["entities"]["resource"]:
-            a._registered["entities"]["resource"]["dummy"] = {}
-        a._registered["entities"]["resource"]["dummy"][DUMMYKEY] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
+        a.aggregator = "www.example.com"
+        a._node_data["registered"] = True
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        if "entities" not in a._node_data:
+            a._node_data["entities"] = {}
+        if "resource" not in a._node_data["entities"]:
+            a._node_data["entities"]["resource"] = {}
+        if "dummy" not in a._node_data["entities"]["resource"]:
+            a._node_data["entities"]["resource"]["dummy"] = {}
+        a._node_data["entities"]["resource"]["dummy"][DUMMYKEY] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
 
         queue = [
             {"method": "DELETE", "namespace": "resource", "res_type": "dummy", "key": DUMMYKEY}
@@ -529,17 +1201,17 @@ class TestAggregator(unittest.TestCase):
         a._reg_queue.get.side_effect = lambda: queue.pop(0)
 
         expected_calls = [
-            mock.call('DELETE', '/resource/dummys/' + DUMMYKEY),
+            mock.call('DELETE', "www.example.com", "v1.2", '/resource/dummys/' + DUMMYKEY)
             ]
 
         def killloop(*args, **kwargs):
             a._running = False
 
         with mock.patch('gevent.sleep', side_effect=killloop):
-            with mock.patch.object(a, '_SEND', side_effect=InvalidRequest) as SEND:
+            with mock.patch.object(a, '_send', side_effect=InvalidRequest) as send:
                 a._process_queue()
 
-                SEND.assert_has_calls(expected_calls)
+                send.assert_has_calls(expected_calls)
                 a._mdns_updater.P2P_disable.assert_not_called()
 
     def test_process_queue_processes_queue_when_running_and_ignores_unknown_methods(self):
@@ -550,15 +1222,16 @@ class TestAggregator(unittest.TestCase):
         DUMMYPARAMVAL = "dummyparamval"
 
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a._registered["registered"] = True
-        a._registered["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
-        if "entities" not in a._registered:
-            a._registered["entities"] = {}
-        if "resource" not in a._registered["entities"]:
-            a._registered["entities"]["resource"] = {}
-        if "dummy" not in a._registered["entities"]["resource"]:
-            a._registered["entities"]["resource"]["dummy"] = {}
-        a._registered["entities"]["resource"]["dummy"][DUMMYKEY] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
+        a.aggregator = "www.example.com"
+        a._node_data["registered"] = True
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        if "entities" not in a._node_data:
+            a._node_data["entities"] = {}
+        if "resource" not in a._node_data["entities"]:
+            a._node_data["entities"]["resource"] = {}
+        if "dummy" not in a._node_data["entities"]["resource"]:
+            a._node_data["entities"]["resource"]["dummy"] = {}
+        a._node_data["entities"]["resource"]["dummy"][DUMMYKEY] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
 
         queue = [
             {"method": "DANCE", "namespace": "resource", "res_type": "dummy", "key": DUMMYKEY}
@@ -571,17 +1244,18 @@ class TestAggregator(unittest.TestCase):
             a._running = False
 
         with mock.patch('gevent.sleep', side_effect=killloop):
-            with mock.patch.object(a, '_SEND', side_effect=InvalidRequest) as SEND:
+            with mock.patch.object(a, '_send', side_effect=InvalidRequest) as send:
                 a._process_queue()
 
-                SEND.assert_not_called()
+                send.assert_not_called()
                 a._mdns_updater.P2P_disable.assert_not_called()
 
     def test_process_queue_handles_exception_in_unqueueing(self):
         """An exception in unqueing an item should reset the object state to unregistered."""
 
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a._registered["registered"] = True
+        a._node_data["registered"] = True
+        a.aggregator = "www.example.com"
 
         a._reg_queue.empty.return_value = False
         a._reg_queue.get.side_effect = Exception
@@ -590,783 +1264,340 @@ class TestAggregator(unittest.TestCase):
             a._running = False
 
         with mock.patch('gevent.sleep', side_effect=killloop):
-            with mock.patch.object(a, '_SEND') as SEND:
+            with mock.patch.object(a, '_send') as send:
                 a._process_queue()
 
-                SEND.assert_not_called()
+                send.assert_not_called()
                 a._mdns_updater.P2P_disable.assert_called_with()
-                self.assertFalse(a._registered["registered"])
+                self.assertFalse(a._node_data["registered"])
 
-    def test_process_queue_starts_backoff_on_send_exception(self):
-        """If the _SEND method returns EndOfAggregatorList exception, queue should start timer to stop further
-        Calls to the aggregator until timeout"""
-        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
-        DUMMYKEY = "dummykey"
-        DUMMYPARAMKEY = "dummyparamkey"
-        DUMMYPARAMVAL = "dummyparamval"
-
-        a = Aggregator(mdns_updater=mock.MagicMock())
-        a._registered["registered"] = True
-        a._registered["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
-        if "entities" not in a._registered:
-            a._registered["entities"] = {}
-        if "resource" not in a._registered["entities"]:
-            a._registered["entities"]["resource"] = {}
-        if "dummy" not in a._registered["entities"]["resource"]:
-            a._registered["entities"]["resource"]["dummy"] = {}
-        a._registered["entities"]["resource"]["dummy"][DUMMYKEY] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
-
-        queue = [
-            {"method": "POST", "namespace": "resource", "res_type": "node", "key": DUMMYNODEID},
-            {"method": "POST", "namespace": "resource", "res_type": "dummy", "key": DUMMYKEY}
-            ]
-
-        a._reg_queue.empty.side_effect = lambda: (len(queue) == 0)
-        a._reg_queue.get.side_effect = lambda: queue.pop(0)
-
-        expected_calls = [
-            mock.call('POST', '/resource', a._registered["node"]),
-            mock.call('POST', '/resource', a._registered["entities"]["resource"]["dummy"][DUMMYKEY])
-            ]
-
-        def killloop(*args, **kwargs):
-            a._running = False
-
-        with mock.patch('gevent.sleep', side_effect=killloop):
-            with mock.patch.object(a, '_SEND', side_effect=EndOfAggregatorList) as SEND:
-                a._process_queue()
-
-                SEND.assert_has_calls(expected_calls)
-                a._mdns_updater.P2P_disable.assert_not_called()
-                self.mocks['gevent.spawn'].assert_called_with(a._backoff_timer_thread)
-
-    def test_backoff_thread_timout(self):
-        """Check that the timeout thread, sets and un-sets the backoff flag after a timeout"""
-        a = Aggregator(mdns_updater=mock.MagicMock())
-        a._registered["registered"] = True
-
-        with mock.patch('gevent.sleep') as timer:
-            with mock.patch.object(a, '_process_reregister'):
-                a._backoff_timer_thread()
-                timer.assert_called_with(BACKOFF_INITIAL_TIMOUT_SECONDS)
-                self.assertFalse(a._backoff_active)
-
-    def test_backoff_thread_timout_after_multiple_failures(self):
-        """Check that the timeout thread, sets and un-sets the backoff flag after multiple timeouts"""
-        a = Aggregator(mdns_updater=mock.MagicMock())
-        a._registered["registered"] = True
-
-        expected_calls = []
-        for x in range(0, 7):
-            expected_calls.append(mock.call((BACKOFF_INITIAL_TIMOUT_SECONDS) * 2**x))
-        expected_calls.append(mock.call(BACKOFF_MAX_TIMEOUT_SECONDS))
-
-        class scoper:
-            num_calls = 0
-        def re_register(*args, **kwargs):
-            scoper.num_calls += 1
-            if scoper.num_calls < 8:
-                a._registered["registered"] = False
-            else:
-                a._registered["registered"] = True
-
-        with mock.patch('gevent.sleep') as timer:
-            with mock.patch.object(a, '_process_reregister', side_effect=re_register):
-                a._backoff_timer_thread()
-                timer.assert_has_calls(expected_calls)
-                self.assertFalse(a._backoff_active)
-
-    # ===================================================================================
-    # In order to test the _process_reregister method we define some extra infrastructure
-    # ===================================================================================
-
-    # These are the steps that the method passes through before completing, it is possible for it to fail early
-    REREGISTER_START       = 0
-    REREGISTER_DELETE      = 1
-    REREGISTER_INC_PTP     = 2
-    REREGISTER_QUEUE_DRAIN = 3
-    REREGISTER_NODE        = 4
-    REREGISTER_RESOURCES   = 5
-    REREGISTER_COMPLETE    = 6
-
-    def assert_reregister_runs_correctly(
-        self,
-        _send=None,
-        to_point=REREGISTER_COMPLETE,
-        with_prerun=None,
-        trigger_exception_in_drain=False
-    ):
-        """This method is used to assert that the _process_reregister method runs to the specified point.
-        The other parameters allow the test conditions to be varied.
-        _send is a side-effect which will be applied whenever the _SEND method is called.
-        with_prerun can be set to a callable which takes the aggregator object as a single parameter and is called
-        just before a._process_reregister is.
-        """
-        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
-        DUMMYKEY = "dummykey"
-        DUMMYPARAMKEY = "dummyparamkey"
-        DUMMYPARAMVAL = "dummyparamval"
-        DUMMYFLOW = "dummyflow"
-        DUMMYDEVICE = "dummydevice"
-
-        a = Aggregator(mdns_updater=mock.MagicMock())
-        a._running = True
-        a._registered["registered"] = True
-        a._registered["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
-        if "entities" not in a._registered:
-            a._registered["entities"] = {}
-        if "resource" not in a._registered["entities"]:
-            a._registered["entities"]["resource"] = {}
-        if "dummy" not in a._registered["entities"]["resource"]:
-            a._registered["entities"]["resource"]["dummy"] = {}
-        if "device" not in a._registered["entities"]["resource"]:
-            a._registered["entities"]["resource"]["device"] = {}
-        if "flow" not in a._registered["entities"]["resource"]:
-            a._registered["entities"]["resource"]["flow"] = {}
-        a._registered["entities"]["resource"]["dummy"][DUMMYKEY]     = {DUMMYPARAMKEY: DUMMYPARAMVAL}
-        a._registered["entities"]["resource"]["device"][DUMMYDEVICE] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
-        a._registered["entities"]["resource"]["flow"][DUMMYFLOW]     = {DUMMYPARAMKEY: DUMMYPARAMVAL}
-
-        queue = starting_queue = [
-            {"method": "POST",   "namespace": "resource", "res_type": "dummy", "key": DUMMYKEY},
-            {"method": "DELETE", "namespace": "resource", "res_type": "dummy", "key": DUMMYKEY}
-            ]
-
-        a._reg_queue.empty.side_effect = lambda: (len(queue) == 0)
-
-        class SpecialEmptyQueueException (Exception):
-            pass
-        gevent.queue.Queue.Empty = SpecialEmptyQueueException
-
-        def _get(block=True):
-            if len(queue) == 0 or trigger_exception_in_drain:
-                while len(queue) > 0:
-                    queue.pop(0)
-                raise gevent.queue.Queue.Empty
-            return queue.pop(0)
-        a._reg_queue.get.side_effect = _get
-
-        expected_send_calls = []
-        if to_point >= self.REREGISTER_DELETE:
-            expected_send_calls += [
-                mock.call("DELETE", "/resource/nodes/" + a._registered["node"]["data"]["id"]),
-                ]
-        if to_point >= self.REREGISTER_NODE:
-            expected_send_calls += [
-                mock.call('POST', '/resource', a._registered["node"]),
-                ]
-        if to_point > self.REREGISTER_NODE:
-            expected_send_calls += [
-                mock.call('POST', '/health/nodes/' + DUMMYNODEID)
-            ]
-
-        expected_put_calls = []
-        if to_point >= self.REREGISTER_RESOURCES:
-            # The reregistration of the other resources should be queued for the next run loop, and arranged in order
-            expected_put_calls = (
-                sum([
-                    [mock.call({"method": "POST",   "namespace": "resource", "res_type": res_type, "key": key}) for key in a._registered["entities"]["resource"][res_type]]
-                    for res_type in a.registration_order if res_type in a._registered["entities"]["resource"]
-                    ], []) +
-                sum([
-                    [mock.call({"method": "POST",   "namespace": "resource", "res_type": res_type, "key": key}) for key in a._registered["entities"]["resource"][res_type]]
-                    for res_type in a._registered["entities"]["resource"] if res_type not in a.registration_order
-                    ], [])
-                )
-
-        with mock.patch.object(a, '_SEND', side_effect=_send) as SEND:
-            if with_prerun is not None:
-                with_prerun(a)
-            a._process_reregister()
-
-            self.assertCountEqual(SEND.mock_calls, expected_send_calls)
-            if to_point >= self.REREGISTER_INC_PTP:
-                a._mdns_updater.inc_P2P_enable_count.assert_called_with()
-            else:
-                a._mdns_updater.inc_P2P_enable_count.assert_not_called()
-            if to_point >= self.REREGISTER_QUEUE_DRAIN:
-                self.assertListEqual(queue, [])
-            else:
-                self.assertListEqual(queue, starting_queue)
-            if to_point > self.REREGISTER_NODE:
-                a._mdns_updater.P2P_disable.assert_called_with()
-            else:
-                a._mdns_updater.P2P_disable.assert_not_called()
-            self.assertListEqual(a._reg_queue.put.mock_calls, expected_put_calls)
-
-    def test_process_reregister(self):
-        """A call to process_reregister with no errors should delete the current registration, increment the P2P
-        enable counter, drain the queue, reregister the node, and then reregister the resources."""
-        self.assert_reregister_runs_correctly()
-
-    def test_process_reregister_handles_queue_exception(self):
-        """A call to process_reregister where the queue drain raises an exception should still delete the current
-        registration, increment the P2P enable counter, drain the queue, reregister the node, and then reregister
-        the resources."""
-        self.assert_reregister_runs_correctly(trigger_exception_in_drain=True)
-
-    def test_process_reregister_bails_if_node_not_registered(self):
-        """A call to process_reregister where the node is not registered should bail at the start."""
-        def _prerun(a):
-            a._registered["registered"] = False
-            a._registered["node"] = None
-
-        self.assert_reregister_runs_correctly(to_point=self.REREGISTER_START, with_prerun=_prerun)
-
-    def test_process_reregister_continues_when_delete_fails(self):
-        """A call to process_reregister where the DELETE call returns 404 should still delete the current registration,
-        increment the P2P enable counter, drain the queue, reregister the node, and then reregister the resources."""
-        def _send(method, path, data=None):
-            if method == "DELETE":
-                raise InvalidRequest(status_code=404)
-            else:
-                return
-        self.assert_reregister_runs_correctly(_send=_send)
-
-    def test_process_reregister_bails_if_delete_throws_500_exception(self):
-        """A call to process_reregister where DELETE message throws an EndOfAggregatorList exception should bail"""
-        def _send(method, path, data=None):
-            if method == "DELETE":
-                raise EndOfAggregatorList
-            else:
-                return
-        self.assert_reregister_runs_correctly(_send=_send, to_point=self.REREGISTER_DELETE)
-
-    def test_process_reregister_bails_if_delete_throws_unknown_exception(self):
-        """A call to process_reregister where DELETE message throws an unknown exception should bail"""
-        def _send(method, path, data=None):
-            if method == "DELETE":
-                raise Exception
-            else:
-                return
-        self.assert_reregister_runs_correctly(_send=_send, to_point=self.REREGISTER_DELETE)
-
-    def test_process_reregister_bails_if_first_post_throws_unknown_exception(self):
-        """A call to process_reregister where the POST call raises an exception should still delete the current
-        registration, increment the P2P enable counter, drain the queue, and try to reregister the node,
-        but should bail before reregistering the resources."""
-        def _send(method, path, data=None):
-            if method == "POST":
-                raise Exception
-            else:
-                return
-        self.assert_reregister_runs_correctly(_send=_send, to_point=self.REREGISTER_NODE)
-
-    def test_process_reregister_bails_if_first_post_throws_500_exception(self):
-        """A call to process_reregister where the POST call raises an EndOfAggregatorList exception should still delete 
-        the current registration, increment the P2P enable counter, drain the queue, and try to reregister the node,
-        but should bail before reregistering the resources."""
-        def _send(method, path, data=None):
-            if method == "POST":
-                raise EndOfAggregatorList
-            else:
-                return
-        self.assert_reregister_runs_correctly(_send=_send, to_point=self.REREGISTER_NODE)
-
-    # ===================================================================================
-    # In order to test the _SEND method we define some extra infrastructure
-    # ===================================================================================
-
-    # These are the steps that the method passes through before completing, it is possible for it to fail early
-    SEND_START                    = 0
-    SEND_AGGREGATOR_EMPTY_CHECK_0 = 1
-    SEND_ITERATION_0              = 2
-    SEND_AGGREGATOR_EMPTY_CHECK_1 = 3
-    SEND_ITERATION_1              = 4
-    SEND_AGGREGATOR_EMPTY_CHECK_2 = 5
-    SEND_ITERATION_2              = 6
-
+    # # ================================================================================================================
+    # # Test _send method
+    # # ================================================================================================================
     def assert_send_runs_correctly(
         self, method,
+        aggregator, api_ver,
         url, data=None,
-        headers=None,
-        to_point=SEND_ITERATION_0,
-        initial_aggregator="",
-        aggregator_urls=[
-            "http://example0.com/aggregator/",
-            "http://example1.com/aggregator/",
-            "http://example2.com/aggregator/"],
         request=None,
         expected_return=None,
         expected_exception=None,
         prefer_ipv6=False
     ):
-        """This method checks that the SEND routine runs through its state machine as expected:
+        """Funstion to test that the _send() method runs correctly"""
 
-        The states are:
-            SEND_START                    = The start of the method
-            SEND_AGGREGATOR_EMPTY_CHECK_0 = Check that the aggregator value href isn't empty
-            SEND_ITERATION_0              = Attempt a SEND
-            SEND_AGGREGATOR_EMPTY_CHECK_1 = Check that the aggregator value href isn't empty
-            SEND_ITERATION_1              = Attempt a SEND
-            SEND_AGGREGATOR_EMPTY_CHECK_2 = Check that the aggregator value href isn't empty
-            SEND_ITERATION_2              = Attempt a SEND
-            SEND_TOO_MANY_RETRIES         = Raise an exception due to too many failures.
-
-        If any of the SEND attempts succeeds then the routine exits immediately successfully."""
-
-        if aggregator_urls:
-            aggregator_urls_queue = [x for x in aggregator_urls]
-        else:
-            aggregator_urls_queue = None
-
-        def create_mock_request(method, url, aggregator_url, expected_data, headers, prefer_ipv6=False):
+        def create_mock_request(method, aggregator_url, api_ver, url, expected_data, prefer_ipv6=False):
             if not prefer_ipv6:
                 return (mock.call(
                     method,
                     urljoin(
                         aggregator_url,
-                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url
+                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + a.aggregator_apiversion + url
                     ),
-                    data=expected_data,
-                    headers=headers,
+                    json=expected_data,
                     timeout=1.0))
             else:
                 return (mock.call(
                     method,
                     urljoin(
                         aggregator_url,
-                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + url
+                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + a.aggregator_apiversion + url
                     ),
-                    data=expected_data,
-                    headers=headers,
+                    json=expected_data,
                     timeout=1.0,
                     proxies={'http': ''}))
 
-        def return_list(*args, **kwargs):
-            return copy.copy(aggregator_urls_queue)
-
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a.mdnsbridge.getHrefList.side_effect = return_list
-        a.aggregator = initial_aggregator
-
-        expected_gethref_calls = []
-        if initial_aggregator == "":
-            expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
-
-        if data is not None:
-            expected_data = json.dumps(data)
-        else:
-            expected_data = None
 
         expected_request_calls = []
-        if to_point >= self.SEND_ITERATION_0:
-            expected_request_calls.append(
-                create_mock_request(method, url, aggregator_urls[0], expected_data, headers, prefer_ipv6))
-        if to_point >= self.SEND_ITERATION_1:
-            expected_request_calls.append(
-                create_mock_request(method, url, aggregator_urls[1], expected_data, headers, prefer_ipv6))
-        if to_point >= self.SEND_ITERATION_2:
-            expected_request_calls.append(
-                create_mock_request(method, url, aggregator_urls[2], expected_data, headers, prefer_ipv6))
-
-        if to_point == self.SEND_AGGREGATOR_EMPTY_CHECK_0:
-            expected_exception = NoAggregator
-            expected_gethref_calls.append(mock.call(LEGACY_REG_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
-            expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
-            expected_gethref_calls.append(mock.call(LEGACY_REG_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
-        elif to_point in (self.SEND_AGGREGATOR_EMPTY_CHECK_1, self.SEND_AGGREGATOR_EMPTY_CHECK_2):
-            expected_exception = EndOfAggregatorList
-            expected_gethref_calls.append(mock.call(REGISTRATION_MDNSTYPE, None, AGGREGATOR_APIVERSION, "http"))
+        expected_request_calls.append(
+            create_mock_request(method, aggregator, api_ver, url, data, prefer_ipv6)
+        )
 
         with mock.patch.dict(nmosnode.aggregator._config, {'prefer_ipv6': prefer_ipv6}):
             with mock.patch("requests.request", side_effect=request) as _request:
                 R = None
                 if expected_exception is not None:
                     with self.assertRaises(expected_exception):
-                        R = a._SEND(method, url, data)
+                        R = a._send(method, aggregator, api_ver, url, data)
                 else:
                     try:
-                        R = a._SEND(method, url, data)
+                        R = a._send(method, aggregator, api_ver, url, data)
                     except Exception as e:
-                        self.fail(msg="_SEND threw an unexpected exception, {}".format(e))
+                        self.fail(msg="_send threw an unexpected exception, {}".format(e))
 
-                self.assertListEqual(a.mdnsbridge.getHrefList.mock_calls, expected_gethref_calls)
                 self.assertListEqual(_request.mock_calls, expected_request_calls)
-                self.assertEqual(R, expected_return)
+                if R:
+                    self.assertEqual(R.content, expected_return)
 
-    def test_send_get_with_no_aggregators_fails_at_first_checkpoint(self):
-        """If there are no aggregators then the SEND method will fail immediately"""
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_0,
-                                        aggregator_urls=None)
-
-    def test_send_get_which_returns_400_raises_exception(self):
-        """If the first attempt at sending gives a 400 error then the SEND method will raise it."""
+    def test_send_200_response(self):
+        TEST_CONTENT = "kasjhdlkhnjgsn"
         def request(*args, **kwargs):
-            return mock.MagicMock(status_code=400)
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_ITERATION_0,
-                                        request=request,
-                                        expected_exception=InvalidRequest)
+            return mock.MagicMock(status_code=200, content=TEST_CONTENT)
+        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
+                                        request=request, expected_return=TEST_CONTENT)
 
-    def test_send_get_which_returns_204_returns_nothing(self):
-        """If the first attempt at sending gives a 204 success then the SEND method will return normally."""
+    def test_send_200_response_ipv6(self):
+        TEST_CONTENT = "kasjhdlkhnjgsn"
         def request(*args, **kwargs):
-            return mock.MagicMock(status_code=204)
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_ITERATION_0,
-                                        request=request,
-                                        expected_return=None)
+            return mock.MagicMock(status_code=200, content=TEST_CONTENT)
+        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
+                                        request=request, expected_return=TEST_CONTENT, prefer_ipv6=True)
 
-    def test_send_put_which_returns_204_returns_nothing(self):
-        """If the first attempt at sending gives a 204 success then the SEND method will return normally."""
-        data = {
-            "dummy0": "dummy1",
-            "dummy2": ["dummy3", "dummy4"]}
-
+    def test_send_201_response(self):
+        TEST_CONTENT = "kasjhdlkhnjgsn"
         def request(*args, **kwargs):
-            return mock.MagicMock(status_code=204)
-        self.assert_send_runs_correctly("PUT", "/dummy/url",
-                                        data=data,
-                                        headers={"Content-Type": "application/json"},
-                                        to_point=self.SEND_ITERATION_0,
-                                        request=request,
-                                        expected_return=None)
+            return mock.MagicMock(status_code=201, content=TEST_CONTENT)
+        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
+                                        request=request, expected_return=TEST_CONTENT)
 
-    def test_send_get_which_returns_200_returns_content(self):
-        """If the first attempt at sending gives a 200 success then the SEND method will return normally with a body."""
-        TEST_CONTENT = "kasjhdlkhnjgsnhjhgwhudjdndjhnrhg;kduhjhnf"
-
+    def test_send_204_response(self):
+        TEST_CONTENT = "kasjhdlkhnjgsn"
         def request(*args, **kwargs):
-            return mock.MagicMock(status_code=200, headers={}, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_ITERATION_0,
-                                        request=request,
-                                        expected_return=TEST_CONTENT)
+            return mock.MagicMock(status_code=204, content=TEST_CONTENT)
+        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
+                                        request=request, expected_return=TEST_CONTENT)
 
-    def test_send_over_ipv6_get_which_returns_200_returns_content(self):
-        """If the first attempt at sending gives a 200 success then the SEND method will return normally with a body
-        over ipv6."""
-        TEST_CONTENT = "kasjhdlkhnjgsnhjhgwhudjdndjhnrhg;kduhjhnf"
-
+    def test_send_409_response(self):
+        TEST_CONTENT = "kasjhdlkhnjgsn"
         def request(*args, **kwargs):
-            return mock.MagicMock(status_code=200, headers={}, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_ITERATION_0,
-                                        request=request,
-                                        expected_return=TEST_CONTENT,
-                                        prefer_ipv6=True)
+            return mock.MagicMock(status_code=409, content=TEST_CONTENT)
+        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
+                                        request=request, expected_return=TEST_CONTENT)
 
-    def test_send_get_which_returns_201_returns_content(self):
-        """If the first attempt at sending gives a 201 success then the SEND method will return normally with a body."""
-        TEST_CONTENT = "kasjhdlkhnjgsnhjhgwhudjdndjhnrhg;kduhjhnf"
-
+    def test_send_4xx_response(self):
+        """On a 4xx response an InvalidRequest Exception should be raised
+        apart from 409, which is handled separately"""
         def request(*args, **kwargs):
-            return mock.MagicMock(status_code=201, headers={}, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_ITERATION_0,
-                                        request=request,
-                                        expected_return=TEST_CONTENT)
+            return mock.MagicMock(status_code=401)
+        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
+                                        request=request, expected_exception=InvalidRequest)
 
-    def test_send_get_which_returns_200_and_json_returns_json(self):
-        """If the first attempt at sending gives a 200 success then the SEND method will return normally and decode
-        the body as json."""
-        TEST_CONTENT = {
-            "foo": "bar",
-            "baz": ["potato", "sundae"]}
-            
-        def request(*args, **kwargs):
-            return mock.MagicMock(status_code=200, headers={"content-type": "application/json"}, json=mock.MagicMock(return_value=TEST_CONTENT))
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_ITERATION_0,
-                                        request=request,
-                                        expected_return=TEST_CONTENT)
-
-    def test_send_get_which_fails_with_only_one_aggregator_fails_at_second_checkpoint(self):
-        """If the first attempt at sending times out then the SEND routine will try to get an alternative href,
-        if it fails it will fail."""
-        def request(*args, **kwargs):
-            return None
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1,
-                                        request=request,
-                                        aggregator_urls=["http://example.com/aggregator/"])
-
-    def test_send_get_which_raises_with_only_one_aggregator_fails_at_second_checkpoint(self):
-        """If the first attempt at sending throws an Exception then the SEND routine will try to get an alternative
-        href, if it fails it will fail."""
-        def request(*args, **kwargs):
-            raise requests.exceptions.RequestException
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1,
-                                        request=request,
-                                        aggregator_urls=["http://example.com/aggregator/"])
-
-    def test_send_get_which_returns_500_with_only_one_aggregator_fails_at_second_checkpoint(self):
-        """If the first attempt at sending returns a 500 error then the SEND routine will try to get an alternative
-        href, if it fails it will fail."""
+    def test_send_5xx_response(self):
+        """On a 5xx response a ServerSideError Exception should be raised"""
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=500)
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_1,
-                                        request=request,
-                                        aggregator_urls=["http://example.com/aggregator/"])
+        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
+                                        request=request, expected_exception=ServerSideError)
 
-    def test_send_get_which_fails_then_returns_400_raises_exception(self):
-        """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the second attempt returns a 400 then it will raise an Exception"""
-        class scoper:
-            num_calls = 0
-        def request(*args, **kwargs):
-            scoper.num_calls += 1
-            if scoper.num_calls == 1:
-                return None
-            else:
-                return mock.MagicMock(status_code=400)
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_ITERATION_1,
-                                        request=request,
-                                        expected_exception=InvalidRequest)
-
-    def test_send_get_which_fails_then_returns_204_returns_nothing(self):
-        """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the second attempt returns a 204 then it will return normally."""
-        class scoper:
-            num_calls = 0
-        def request(*args, **kwargs):
-            scoper.num_calls += 1
-            if scoper.num_calls == 1:
-                return None
-            else:
-                return mock.MagicMock(status_code=204)
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_ITERATION_1,
-                                        request=request,
-                                        expected_return=None)
-
-    def test_send_get_which_fails_then_returns_200_returns_content(self):
-        """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the second attempt returns a 200 then it will return the body sent back by the remote aggregator"""
-        TEST_CONTENT = "kasjhdlkhnjgsnhjhgwhudjdndjhnrhg;kduhjhnf"
-
-        class scoper:
-            num_calls = 0
-        def request(*args, **kwargs):
-            scoper.num_calls += 1
-            if scoper.num_calls == 1:
-                return None
-            else:
-                return mock.MagicMock(status_code=200, headers={}, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_ITERATION_1,
-                                        request=request,
-                                        expected_return=TEST_CONTENT)
-
-    def test_send_get_which_fails_then_returns_201_returns_content(self):
-        """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the second attempt returns a 201 then it will return the body sent back by the remote aggregator"""
-        TEST_CONTENT = "kasjhdlkhnjgsnhjhgwhudjdndjhnrhg;kduhjhnf"
-        
-        class scoper:
-            num_calls = 0
-        def request(*args, **kwargs):
-            scoper.num_calls += 1
-            if scoper.num_calls == 1:
-                return None
-            else:
-                return mock.MagicMock(status_code=201, headers={}, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_ITERATION_1,
-                                        request=request,
-                                        expected_return=TEST_CONTENT)
-
-    def test_send_get_which_fails_then_returns_200_and_json_returns_content(self):
-        """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the second attempt returns a 200 with Content-Type as application/json then it will return the body sent
-        back by the remote aggregator decoded as json"""
-        TEST_CONTENT = {
-            "foo": "bar",
-            "baz": ["potato", "sundae"]}
-
-        class scoper:
-            num_calls = 0
-        def request(*args, **kwargs):
-            scoper.num_calls += 1
-            if scoper.num_calls == 1:
-                return None
-            else:
-                return mock.MagicMock(status_code=200, headers={"content-type": "application/json"}, json=mock.MagicMock(return_value=TEST_CONTENT))
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_ITERATION_1,
-                                        request=request,
-                                        expected_return=TEST_CONTENT)
-
-    def test_send_get_which_fails_with_only_two_aggregators_fails_at_third_checkpoint(self):
-        """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the second attempt at sending times out then the SEND routine will try to get an alternative href.
-        If it fails then the call fails."""
+    def test_send_no_response(self):
+        """On a no response a ServerSideError Exception should be raised"""
         def request(*args, **kwargs):
             return None
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_AGGREGATOR_EMPTY_CHECK_2,
-                                        request=request,
-                                        aggregator_urls=["http://example.com/aggregator/", "http://example1.com/aggregator/"])
+        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
+                                        request=request, expected_exception=ServerSideError)
 
-    def test_send_get_which_fails_twice_then_returns_400_raises_exception(self):
-        """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the second attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the third attempt returns a 400 then it raiases an exception."""
-        class scoper:
-            num_calls = 0
+    def test_send_request_exception(self):
+        """On a request exception a ServerSideError Exception should be raised"""
         def request(*args, **kwargs):
-            scoper.num_calls += 1
-            if scoper.num_calls < 3:
-                return None
-            else:
-                return mock.MagicMock(status_code=400)
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_ITERATION_2,
-                                        request=request,
-                                        expected_exception=InvalidRequest)
+            raise requests.exceptions.RequestException
+        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
+                                        request=request, expected_exception=ServerSideError)
 
-    def test_send_get_which_fails_twice_then_returns_204_returns_nothing(self):
-        """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the second attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the third attempt returns a 204 then it returns normally."""
-        class scoper:
-            num_calls = 0
-        def request(*args, **kwargs):
-            scoper.num_calls += 1
-            if scoper.num_calls < 3:
-                return None
-            else:
-                return mock.MagicMock(status_code=204)
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_ITERATION_2,
-                                        request=request,
-                                        expected_return=None)
+    # ==================================================================================================================
+    # Test main thread
+    # ==================================================================================================================
 
-    def test_send_get_which_fails_twice_then_returns_200_returns_content(self):
-        """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the second attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the third attempt returns a 200 then it returns the body sent back."""
-        TEST_CONTENT = "kasjhdlkhnjgsnhjhgwhudjdndjhnrhg;kduhjhnf"
-
-        class scoper:
-            num_calls = 0
-        def request(*args, **kwargs):
-            scoper.num_calls += 1
-            if scoper.num_calls < 3:
-                return None
-            else:
-                return mock.MagicMock(status_code=200, headers={}, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_ITERATION_2,
-                                        request=request,
-                                        expected_return=TEST_CONTENT)
-
-    def test_send_get_which_fails_twice_then_returns_201_returns_content(self):
-        """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the second attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the third attempt returns a 201 then it returns the body sent back."""
-        TEST_CONTENT = "kasjhdlkhnjgsnhjhgwhudjdndjhnrhg;kduhjhnf"
-
-        class scoper:
-            num_calls = 0
-        def request(*args, **kwargs):
-            scoper.num_calls += 1
-            if scoper.num_calls < 3:
-                return None
-            else:
-                return mock.MagicMock(status_code=201, headers={}, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_ITERATION_2,
-                                        request=request,
-                                        expected_return=TEST_CONTENT)
-
-    def test_send_get_which_fails_twice_then_returns_200_and_json_returns_content(self):
-        """If the first attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the second attempt at sending times out then the SEND routine will try to get an alternative href.
-        If the third attempt returns a 200 with Content-Type as application/json then it returns the body sent
-        back decoded as json."""
-        TEST_CONTENT = {
-            "foo": "bar",
-            "baz": ["potato", "sundae"]}
-
-        class scoper:
-            num_calls = 0
-        def request(*args, **kwargs):
-            scoper.num_calls += 1
-            if scoper.num_calls < 3:
-                return None
-            else:
-                return mock.MagicMock(status_code=200, headers={"content-type": "application/json"}, json=mock.MagicMock(return_value=TEST_CONTENT))
-        self.assert_send_runs_correctly("GET", "/dummy/url",
-                                        to_point=self.SEND_ITERATION_2,
-                                        request=request,
-                                        expected_return=TEST_CONTENT)
-
-    def test_send_raise_exception_after_too_many_500_responses(self):
-        """If the first attempt at sending returns a 500 then the SEND routine will try to get an alternative href.
-        If this happens more than 10 times then a TooManyRetries exception should be raised."""
-
-        test_aggregators = []
-        expected_request_calls = []
-        for x in range(0, 11):
-            test_aggregators.append("http://example{}.com/aggregator/".format(x))
-
-        for x in range(0, 10):
-            expected_request_calls.append(mock.call(
-                    "GET",
-                    urljoin(
-                        test_aggregators[x],
-                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + AGGREGATOR_APIVERSION + "/dummy/url"
-                    ),
-                    data=None,
-                    headers=None,
-                    timeout=1.0))
+    def test_main_thread_under_normal_operation(self):
+        """Test the main thread under normal operation"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        AGGREGATOR_1 = "http://example1.com"
 
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a.mdnsbridge.getHrefList.return_value = copy.copy(test_aggregators)
+        a._node_data["registered"] = False
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
 
-        def request(*args, **kwargs):
-            return mock.MagicMock(status_code=500, headers={}, content={})
+        def killloop(*args, **kwargs):
+            if a._node_data['registered']:
+                a._running = False
 
-        with mock.patch("requests.request", side_effect=request) as _request:
-            with self.assertRaises(TooManyRetries):
-                a._SEND("GET", "/dummy/url")
+        request_mocks = [
+            mock.MagicMock(name="request1()", status_code=404),
+            mock.MagicMock(name="request2()", status_code=201),
+            mock.MagicMock(name="request3()", status_code=200),
+        ]
 
-            self.assertListEqual(_request.mock_calls, expected_request_calls)
+        expected_request_calls = [
+            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+                      "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
+            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion, "resource"),
+                      json={"data": {"id": DUMMYNODEID}, "type": "node"}, timeout=1.0),
+            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+                      "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
+        ]
 
-    def test_get_service_returns_services(self):
-        """Test that an exception is raised when all aggregators have been used"""
+        a.mdnsbridge.getHrefWithException.return_value = AGGREGATOR_1
+
+        with mock.patch('gevent.sleep', side_effect=killloop):
+            with mock.patch('requests.request', side_effect=request_mocks) as request:
+
+                a._main_thread()
+                self.assertTrue(a._node_data["registered"])
+                self.assertListEqual(request.mock_calls, expected_request_calls)
+
+    def test_main_thread_when_heartbeat_200(self):
+        """Test the main thread when heartbeat returns 200 response"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        AGGREGATOR_1 = "http://example1.com"
+
         a = Aggregator(mdns_updater=mock.MagicMock())
-        test_aggregators = ['http://example0.com/aggregator/',
-                            'http://example1.com/aggregator/',
-                            'http://example2.com/aggregator/',
-                            'http://example3.com/aggregator/']
+        a._node_data["registered"] = False
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
 
-        a.mdnsbridge.getHrefList.return_value = copy.copy(test_aggregators)
+        def killloop(*args, **kwargs):
+            if a._node_data['registered']:
+                a._running = False
 
-        for agg in test_aggregators:
-            a._change_aggregator()
-            self.assertEqual(a.aggregator, agg)
+        request_mocks = [
+            mock.MagicMock(name="request1()", status_code=200, headers={}),
+            mock.MagicMock(name="request2()", status_code=204),
+            mock.MagicMock(name="request3()", status_code=201),
+            mock.MagicMock(name="request4()", status_code=200),
+        ]
 
-        a.mdnsbridge.getHrefList.return_value = copy.copy(test_aggregators)
-        with self.assertRaises(EndOfAggregatorList):
-            a._change_aggregator()
-        self.assertEqual(a.aggregator, "")
+        expected_request_calls = [
+            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+                      "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
+            mock.call('DELETE', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+                      "resource/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
+            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion, "resource"),
+                      json={"data": {"id": DUMMYNODEID}, "type": "node"}, timeout=1.0),
+            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+                      "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
+        ]
 
-    def test_get_service_raises_exception_when_no_aggregators(self):
-        """Test that an exception is raised when No Aggregators found"""
+        a.mdnsbridge.getHrefWithException.return_value = AGGREGATOR_1
+
+        with mock.patch('gevent.sleep', side_effect=killloop):
+            with mock.patch('requests.request', side_effect=request_mocks) as request:
+
+                a._main_thread()
+                self.assertTrue(a._node_data["registered"])
+                self.assertListEqual(request.mock_calls, expected_request_calls)
+
+    def test_main_thread_when_heartbeat_5xx(self):
+        """Test the main thread when heartbeat returns 200 response"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        AGGREGATOR_1 = "http://example1.com"
+        AGGREGATOR_2 = "http://example2.com"
+
         a = Aggregator(mdns_updater=mock.MagicMock())
-        a.aggregators = []
-        a.mdnsbridge.getHrefList.return_value = []
+        a._node_data["registered"] = False
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
 
-        with self.assertRaises(NoAggregator):
-            a._get_service_href()
+        def killloop(*args, **kwargs):
+            if a._node_data['registered']:
+                a._running = False
 
-    def test_get_service_raises_exception_when_end_list(self):
-        """Test that an exception is raised when last aggregator has been used"""
+        request_mocks = [
+            mock.MagicMock(name="request1()", status_code=500),
+            mock.MagicMock(name="request2()", status_code=404),
+            mock.MagicMock(name="request3()", status_code=201),
+            mock.MagicMock(name="request4()", status_code=200),
+        ]
+
+        expected_request_calls = [
+            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+                      "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
+            mock.call('POST', self.construct_url(AGGREGATOR_2, a.aggregator_apiversion,
+                      "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
+            mock.call('POST', self.construct_url(AGGREGATOR_2, a.aggregator_apiversion, "resource"),
+                      json={"data": {"id": DUMMYNODEID}, "type": "node"}, timeout=1.0),
+            mock.call('POST', self.construct_url(AGGREGATOR_2, a.aggregator_apiversion,
+                      "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
+        ]
+
+        a.mdnsbridge.getHrefWithException.side_effect = [AGGREGATOR_1, AGGREGATOR_2]
+
+        with mock.patch('gevent.sleep', side_effect=killloop):
+            with mock.patch('requests.request', side_effect=request_mocks) as request:
+
+                a._main_thread()
+                self.assertTrue(a._node_data["registered"])
+                self.assertListEqual(request.mock_calls, expected_request_calls)
+
+    def test_main_thread_when_register_200(self):
+        """Test the main thread when register returns 200 response"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        AGGREGATOR_1 = "http://example1.com"
+
         a = Aggregator(mdns_updater=mock.MagicMock())
-        test_aggregators = ['example0.com']
-        a.aggregator = "example0.com"
-        a.aggregators = []
-        a.mdnsbridge.getHrefList.return_value = test_aggregators
+        a._node_data["registered"] = False
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
 
-        with self.assertRaises(EndOfAggregatorList):
-            a._get_service_href()
+        def killloop(*args, **kwargs):
+            if a._node_data['registered']:
+                a._running = False
 
-        self.assertListEqual(a.aggregators, test_aggregators)
-        self.assertEqual(a.aggregator, "")
+        request_mocks = [
+            mock.MagicMock(name="request1()", status_code=404),
+            mock.MagicMock(name="request2()", status_code=200, headers={}),
+            mock.MagicMock(name="request3()", status_code=204),
+            mock.MagicMock(name="request4()", status_code=201),
+            mock.MagicMock(name="request5()", status_code=200),
+        ]
+
+        expected_request_calls = [
+            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+                      "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
+            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion, "resource"),
+                      json={"data": {"id": DUMMYNODEID}, "type": "node"}, timeout=1.0),
+            mock.call('DELETE', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+                      "resource/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
+            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion, "resource"),
+                      json={"data": {"id": DUMMYNODEID}, "type": "node"}, timeout=1.0),
+            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+                      "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
+        ]
+
+        a.mdnsbridge.getHrefWithException.return_value = AGGREGATOR_1
+
+        with mock.patch('gevent.sleep', side_effect=killloop):
+            with mock.patch('requests.request', side_effect=request_mocks) as request:
+
+                a._main_thread()
+                self.assertTrue(a._node_data["registered"])
+                self.assertListEqual(request.mock_calls, expected_request_calls)
+
+    def test_main_thread_when_register_5xx(self):
+        """Test the main thread when heartbeat returns 200 response"""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        AGGREGATOR_1 = "http://example1.com"
+        AGGREGATOR_2 = "http://example2.com"
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a._node_data["registered"] = False
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+
+        def killloop(*args, **kwargs):
+            if a._node_data['registered']:
+                a._running = False
+
+        request_mocks = [
+            mock.MagicMock(name="request1()", status_code=404),
+            mock.MagicMock(name="request2()", status_code=500),
+            mock.MagicMock(name="request3()", status_code=404),
+            mock.MagicMock(name="request4()", status_code=201),
+            mock.MagicMock(name="request5()", status_code=200),
+        ]
+
+        expected_request_calls = [
+            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+                      "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
+            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion, "resource"),
+                      json={"data": {"id": DUMMYNODEID}, "type": "node"}, timeout=1.0),
+            mock.call('POST', self.construct_url(AGGREGATOR_2, a.aggregator_apiversion,
+                      "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
+            mock.call('POST', self.construct_url(AGGREGATOR_2, a.aggregator_apiversion, "resource"),
+                      json={"data": {"id": DUMMYNODEID}, "type": "node"}, timeout=1.0),
+            mock.call('POST', self.construct_url(AGGREGATOR_2, a.aggregator_apiversion,
+                      "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
+        ]
+
+        a.mdnsbridge.getHrefWithException.side_effect = [AGGREGATOR_1, AGGREGATOR_2]
+
+        with mock.patch('gevent.sleep', side_effect=killloop):
+            with mock.patch('requests.request', side_effect=request_mocks) as request:
+
+                a._main_thread()
+                self.assertTrue(a._node_data["registered"])
+                self.assertListEqual(request.mock_calls, expected_request_calls)
