@@ -304,8 +304,8 @@ class NodeFacadeService:
         self.logger.writeInfo("Stopped main()")
 
     def stop(self):
-        self.running = False
         self._cleanup()
+        self.running = False
 
 
 if __name__ == '__main__':

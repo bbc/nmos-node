@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.10.10
+- Clean-up before stopping service thread
+
 ## 0.10.9
 - Add api downgrade function from nmoscommon
 
