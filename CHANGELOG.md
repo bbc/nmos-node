@@ -1,7 +1,8 @@
 # NMOS Node API Implementation Changelog
 
-## 0.10.10
-- Add exponential backoff when registration APIs return 500 responses
+## 0.11.0
+- Add exponential backoff when registration APIs return HTTP 500 responses
+- Add support for un-registering when requests return HTTP 409 responses
 
 ## 0.10.9
 - Add api downgrade function from nmoscommon
