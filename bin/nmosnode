@@ -4,11 +4,10 @@ from __future__ import print_function
 from gevent import monkey
 monkey.patch_all()
 
-from nmosnode.nodefacadeservice import NodeFacadeService
-
 import argparse
 import traceback
 
+from nmosnode.nodefacadeservice import NodeFacadeService
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Node Facade")
@@ -34,7 +33,10 @@ Use ^D to exit this console to quit.""")
             print("Opening Debug console on port {}".format(args.interactive))
             try:
                 backdoor.serve_forever()
-            except:
+
+            except Exception:
+                global die
+                die = True
                 traceback.print_exc()
                 service.stop()
 

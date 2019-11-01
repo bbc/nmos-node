@@ -4,6 +4,9 @@
 - Add exponential backoff when registration APIs return HTTP 500 responses
 - Add support for un-registering when requests return HTTP 409 responses
 
+## 0.10.10
+- Clean-up before stopping service thread
+
 ## 0.10.9
 - Add api downgrade function from nmoscommon
 
