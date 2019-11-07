@@ -395,6 +395,7 @@ class Aggregator(object):
                                                  .format(queue_item["method"]))
                 except ServerSideError:
                     self.aggregator = None
+                    self._aggregator_failure = True
                     self._add_request_to_front_of_queue(queue_item)
                 except Exception:
                     self._node_data["registered"] = False

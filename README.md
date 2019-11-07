@@ -6,6 +6,8 @@ An implementation of an AMWA NMOS IS-04 Node API.
 
 Package providing a basic NMOS Node API implementation. It takes the form of a "Node Facade" which accepts data from private back-end data providers.
 
+![State Diagram](NodeAggregatorStateDiagram.png)
+
 ## Installation
 
 ### Requirements
