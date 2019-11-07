@@ -1202,7 +1202,7 @@ class TestAggregator(unittest.TestCase):
 
         expected_calls = [
             mock.call('DELETE', "www.example.com", "v1.2", '/resource/dummys/' + DUMMYKEY)
-            ]
+        ]
 
         def killloop(*args, **kwargs):
             a._running = False
@@ -1213,6 +1213,54 @@ class TestAggregator(unittest.TestCase):
 
                 send.assert_has_calls(expected_calls)
                 a._mdns_updater.P2P_disable.assert_not_called()
+
+    def test_process_queue_processes_queue_when_running_and_aborts_on_server_side_exception(self):
+        """If a non-node register performed by the queue processing thread throws a server side exception,
+        new aggregator should be chosen and failed request should be queued added to the front of the queue."""
+        DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
+        DUMMYKEY = "dummykey"
+        DUMMYPARAMKEY = "dummyparamkey"
+        DUMMYPARAMVAL = "dummyparamval"
+
+        a = Aggregator(mdns_updater=mock.MagicMock())
+        a.aggregator = "www.example.com"
+        a._node_data["registered"] = True
+        a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
+        if "entities" not in a._node_data:
+            a._node_data["entities"] = {}
+        if "resource" not in a._node_data["entities"]:
+            a._node_data["entities"]["resource"] = {}
+        if "dummy" not in a._node_data["entities"]["resource"]:
+            a._node_data["entities"]["resource"]["dummy"] = {}
+        a._node_data["entities"]["resource"]["dummy"][DUMMYKEY] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
+
+        expected_queue = [
+            {"method": "POST", "namespace": "resource", "res_type": "dummy", "key": DUMMYKEY},
+            {"method": "POST", "namespace": "resource", "res_type": "left", "key": DUMMYKEY},
+        ]
+        queue = expected_queue.copy()
+        updated_queue = []
+
+        a._reg_queue.empty.side_effect = lambda: (len(queue) == 0)
+        a._reg_queue.get.side_effect = lambda: queue.pop(0)
+        a._reg_queue.put.side_effect = lambda data: updated_queue.append(data)
+
+        expected_calls = [
+            mock.call('POST', "www.example.com", "v1.2", '/resource',
+                      a._node_data["entities"]["resource"]["dummy"][DUMMYKEY]),
+        ]
+
+        def killloop(*args, **kwargs):
+            a._running = False
+
+        with mock.patch('gevent.sleep', side_effect=killloop):
+            with mock.patch.object(a, '_send', side_effect=ServerSideError) as send:
+                a._process_queue()
+
+                send.assert_has_calls(expected_calls)
+                a._mdns_updater.P2P_disable.assert_not_called()
+                self.assertIsNone(a.aggregator)
+                self.assertListEqual(updated_queue, expected_queue)
 
     def test_process_queue_processes_queue_when_running_and_ignores_unknown_methods(self):
         """Unknown verbs in the queue should be ignored."""
@@ -1283,7 +1331,7 @@ class TestAggregator(unittest.TestCase):
         expected_exception=None,
         prefer_ipv6=False
     ):
-        """Funstion to test that the _send() method runs correctly"""
+        """Function to test that the _send() method runs correctly"""
 
         def create_mock_request(method, aggregator_url, api_ver, url, expected_data, prefer_ipv6=False):
             if not prefer_ipv6:

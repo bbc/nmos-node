@@ -19,6 +19,7 @@ monkey.patch_all()
 from six import itervalues # noqa E402
 from six.moves.urllib.parse import urljoin, urlparse # noqa E402
 
+from collections import deque # noqa E402
 import requests # noqa E402
 import json # noqa E402
 import time # noqa E402
@@ -106,7 +107,7 @@ class Aggregator(object):
 
         self.logger.writeDebug("Starting heartbeat thread")
         while self._running:
-            if not self.aggregator:
+            if self.aggregator is None:
                 self._discovery_operation()
             elif self._node_data["node"] and self._node_data["registered"]:
                 self._registered_operation()
@@ -200,7 +201,7 @@ class Aggregator(object):
 
     def _register_node(self):
         """Attempt to register Node with aggregator
-        Returns True is node was succesfully registered with aggregator
+        Returns True is node was successfully registered with aggregator
         Returns False if registration failed
         If registration failed with 200 or 409, will attempt to delete and re-register"""
         if self._node_data.get("node", None) is None:
@@ -392,6 +393,9 @@ class Aggregator(object):
                     else:
                         self.logger.writeWarning("Method {} not supported for Registration API interactions"
                                                  .format(queue_item["method"]))
+                except ServerSideError:
+                    self.aggregator = None
+                    self._add_request_to_front_of_queue(queue_item)
                 except Exception:
                     self._node_data["registered"] = False
                     self.aggregator = None
@@ -403,6 +407,26 @@ class Aggregator(object):
         """Queue a request to be processed.
            Handles all requests except initial Node POST which is done in _process_reregister"""
         self._reg_queue.put({"method": method, "namespace": namespace, "res_type": res_type, "key": key})
+
+    def _add_request_to_front_of_queue(self, request):
+        """Adds item to the front of the queue"""
+
+        new_queue = deque()
+        new_queue.append(request)
+
+        # Drain the queue
+        while not self._reg_queue.empty():
+            try:
+                new_queue.append(self._reg_queue.get())
+            except gevent.queue.Queue.Empty:
+                break
+
+        # Add items back to the queue
+        while True:
+            try:
+                self._reg_queue.put(new_queue.popleft())
+            except IndexError:
+                break
 
     def register(self, res_type, key, **kwargs):
         """Register 'resource' type data including the Node
