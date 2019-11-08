@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.10.11
+- Alter executable to run using Python3, alter `stdeb` to replace python 2 package
+
 ## 0.10.10
 - Clean-up before stopping service thread
 
