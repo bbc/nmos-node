@@ -8,7 +8,7 @@ Type=notify
 User=ipstudio
 Restart=always
 RestartSec=3
-ExecStart=/usr/bin/nmosnode
+ExecStart=/usr/bin/python2 /usr/bin/nmosnode
 
 [Install]
 WantedBy=multi-user.target
