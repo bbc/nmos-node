@@ -87,7 +87,7 @@ class TestAggregator(unittest.TestCase):
         ]
 
         for x in versions_service_type:
-            a._set_api_version(x['api_ver'])
+            a._set_api_version_and_srv_type(x['api_ver'])
 
             self.assertEqual(a.aggregator_apiversion, x['api_ver'])
             self.assertEqual(a.service_type, x['srv_type'])
@@ -141,7 +141,7 @@ class TestAggregator(unittest.TestCase):
 
     def test_unregister(self):
         """unregister() should schedule a call to unregister the specified devices.
-        Special behaviour is expected when unregistering a node."""
+        Special behaviour is expected when unregistering a node, where the request should be made immediately."""
         a = Aggregator()
 
         namespace = "resource"
@@ -153,16 +153,20 @@ class TestAggregator(unittest.TestCase):
         for o in objects:
             a.register(o[0], o[1], **o[2])
 
-            a.unregister(o[0], o[1])
-            a._reg_queue.put.assert_called_with({
-                "method": "DELETE",
-                "namespace": namespace,
-                "res_type": o[0],
-                "key": o[1]})
-            if o[0] == "node":
-                self.assertIsNone(a._node_data["node"])
-            else:
-                self.assertNotIn(o[1], a._node_data["entities"][namespace][o[0]])
+            with mock.patch.object(a, '_unregister_node') as un_register:
+                a.unregister(o[0], o[1])
+
+                if o[0] == "node":
+                    self.assertIsNone(a._node_data["node"])
+                    un_register.assert_called_once_with()
+                else:
+                    un_register.assert_not_called()
+                    a._reg_queue.put.assert_called_with({
+                    "method": "DELETE",
+                    "namespace": namespace,
+                    "res_type": o[0],
+                    "key": o[1]})
+                    self.assertNotIn(o[1], a._node_data["entities"][namespace][o[0]])
 
     def test_stop(self):
         """A call to stop should set _running to false and then join the heartbeat thread."""
@@ -218,12 +222,12 @@ class TestAggregator(unittest.TestCase):
         a.mdnsbridge.getHrefWithException.return_value = aggregator
 
         for v in versions:
-            a._set_api_version(v)
+            a._set_api_version_and_srv_type(v)
             self.assertEqual(a._get_aggregator(), aggregator)
 
         with mock.patch.dict(nmosnode.aggregator._config, {'https_mode': "enabled"}):
             for v in versions:
-                a._set_api_version(v)
+                a._set_api_version_and_srv_type(v)
                 self.assertEqual(a._get_aggregator(), aggregator)
 
         a.mdnsbridge.getHrefWithException.assert_has_calls(expected_calls)
@@ -277,7 +281,7 @@ class TestAggregator(unittest.TestCase):
     # # Test heartbeat operation
     # # ================================================================================================================
 
-    def test_heartbeat_operation_200_when_registered(self):
+    def test_heartbeat_200_when_registered(self):
         """Test heartbeat operation when heartbeat request returns HTTP 200 when registered
         After HTTP 200 heartbeat, Node should still be registered and should wait 5 seconds"""
         DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
@@ -294,7 +298,7 @@ class TestAggregator(unittest.TestCase):
 
         with mock.patch('gevent.sleep', side_effect=killloop) as sleep:
             with mock.patch.object(a, '_send', side_effect=request) as send:
-                return_val = a._heartbeat_operation()
+                return_val = a._heartbeat()
 
                 self.assertTrue(return_val)
                 send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
@@ -305,7 +309,7 @@ class TestAggregator(unittest.TestCase):
                 self.assertEqual(a._backoff_period, 0)
                 sleep.assert_called_with(1)
 
-    def test_heartbeat_operation_200_when_not_registered(self):
+    def test_heartbeat_200_when_not_registered(self):
         """Test heartbeat operation when heartbeat request returns HTTP 200 when not registered
         After HTTP 200 heartbeat, Node should unregister Node then perform re-registration with same aggregator"""
         DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
@@ -320,7 +324,7 @@ class TestAggregator(unittest.TestCase):
         with mock.patch.object(a, '_send', side_effect=request) as send:
             with mock.patch.object(a, '_unregister_node', return_value=True) as un_reg:
                 with mock.patch.object(a, '_register_node', return_value=True) as register:
-                    return_val = a._heartbeat_operation()
+                    return_val = a._heartbeat()
 
                     self.assertTrue(return_val)
                     send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
@@ -329,7 +333,7 @@ class TestAggregator(unittest.TestCase):
                     un_reg.assert_called_once_with('path/xxx')
                     register.assert_called_once_with()
 
-    def test_heartbeat_operation_200_when_not_registered_failure(self):
+    def test_heartbeat_200_when_not_registered_failure(self):
         """Test heartbeat operation when heartbeat request returns HTTP 200 when not registered
         and aggregator in failed state
         After HTTP 200 heartbeat, Node should attempt to unregister node then return"""
@@ -344,7 +348,7 @@ class TestAggregator(unittest.TestCase):
 
         with mock.patch.object(a, '_send', side_effect=request) as send:
             with mock.patch.object(a, '_unregister_node', return_value=False) as un_reg:
-                return_val = a._heartbeat_operation()
+                return_val = a._heartbeat()
 
                 self.assertFalse(return_val)
                 send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
@@ -352,7 +356,7 @@ class TestAggregator(unittest.TestCase):
                 a._mdns_updater.inc_P2P_enable_count.assert_not_called()
                 un_reg.assert_called_once_with('path/xxx')
 
-    def test_heartbeat_operation_409(self):
+    def test_heartbeat_409(self):
         """Test heartbeat operation when heartbeat request returns HTTP 409
         After HTTP 409 heartbeat, Node should unregister Node then perform re-registration with same aggregator"""
         DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
@@ -367,7 +371,7 @@ class TestAggregator(unittest.TestCase):
         with mock.patch.object(a, '_send', side_effect=request) as send:
             with mock.patch.object(a, '_unregister_node', return_value=True) as un_reg:
                 with mock.patch.object(a, '_register_node', return_value=True) as register:
-                    return_val = a._heartbeat_operation()
+                    return_val = a._heartbeat()
 
                     self.assertTrue(return_val)
                     send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
@@ -376,7 +380,7 @@ class TestAggregator(unittest.TestCase):
                     un_reg.assert_called_once_with('path/xxx')
                     register.assert_called_once_with()
 
-    def test_heartbeat_operation_409_failure(self):
+    def test_heartbeat_409_failure(self):
         """Test heartbeat operation when heartbeat request returns HTTP 409 and aggregator in failed state
         After HTTP 409 heartbeat, Node should attempt to unregister Node and return"""
         DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
@@ -390,7 +394,7 @@ class TestAggregator(unittest.TestCase):
 
         with mock.patch.object(a, '_send', side_effect=request) as send:
             with mock.patch.object(a, '_unregister_node', return_value=False) as un_reg:
-                return_val = a._heartbeat_operation()
+                return_val = a._heartbeat()
 
                 self.assertFalse(return_val)
                 send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
@@ -398,7 +402,7 @@ class TestAggregator(unittest.TestCase):
                 a._mdns_updater.inc_P2P_enable_count.assert_not_called()
                 un_reg.assert_called_once_with('path/xxx')
 
-    def test_heartbeat_operation_404(self):
+    def test_heartbeat_404(self):
         """Test heartbeat operation when heartbeat request returns HTTP 404
         After HTTP 404, Node should mark itself as not registered and attempt re-registration"""
         DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
@@ -409,7 +413,7 @@ class TestAggregator(unittest.TestCase):
 
         with mock.patch.object(a, '_send', side_effect=InvalidRequest(status_code=404)) as send:
             with mock.patch.object(a, '_register_node', return_value=True) as register:
-                return_val = a._heartbeat_operation()
+                return_val = a._heartbeat()
 
                 self.assertTrue(return_val)
                 send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
@@ -418,7 +422,7 @@ class TestAggregator(unittest.TestCase):
                 register.assert_called_once_with()
                 self.assertFalse(a._node_data["registered"])
 
-    def test_heartbeat_operation_404_failure(self):
+    def test_heartbeat_404_failure(self):
         """Test heartbeat operation when heartbeat request returns HTTP 404 and aggregator in failed state
         after HTTP 404, Node should mark itself as not registered and attempt re-registration"""
         DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
@@ -429,7 +433,7 @@ class TestAggregator(unittest.TestCase):
 
         with mock.patch.object(a, '_send', side_effect=InvalidRequest(status_code=404)) as send:
             with mock.patch.object(a, '_register_node', return_value=False) as register:
-                return_val = a._heartbeat_operation()
+                return_val = a._heartbeat()
 
                 self.assertFalse(return_val)
                 send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
@@ -438,7 +442,7 @@ class TestAggregator(unittest.TestCase):
                 register.assert_called_once_with()
                 self.assertFalse(a._node_data["registered"])
 
-    def test_heartbeat_operation_4xx_failure(self):
+    def test_heartbeat_4xx_failure(self):
         """Test heartbeat operation when heartbeat request returns HTTP 4xx and aggregator in failed state
         Indicates aggregator has encountered an error, heartbeat should fail and next aggregator should be used"""
         DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
@@ -448,7 +452,7 @@ class TestAggregator(unittest.TestCase):
         a.aggregator = "http://example.com"
 
         with mock.patch.object(a, '_send', side_effect=InvalidRequest(status_code=401)) as send:
-            return_val = a._heartbeat_operation()
+            return_val = a._heartbeat()
 
             self.assertFalse(return_val)
             send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
@@ -456,7 +460,7 @@ class TestAggregator(unittest.TestCase):
             a._mdns_updater.inc_P2P_enable_count.assert_not_called()
             self.assertTrue(a._node_data["registered"])
 
-    def test_heartbeat_operation_5xx_failure(self):
+    def test_heartbeat_5xx_failure(self):
         """Test heartbeat operation when heartbeat request returns HTTP 5xx and aggregator in failed state
         Indicates aggregator has encountered an error, heartbeat should fail and next aggregator should be used"""
         DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
@@ -466,7 +470,7 @@ class TestAggregator(unittest.TestCase):
         a.aggregator = "http://example.com"
 
         with mock.patch.object(a, '_send', side_effect=ServerSideError) as send:
-            return_val = a._heartbeat_operation()
+            return_val = a._heartbeat()
 
             self.assertFalse(return_val)
             send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
@@ -474,7 +478,7 @@ class TestAggregator(unittest.TestCase):
             a._mdns_updater.inc_P2P_enable_count.assert_not_called()
             self.assertTrue(a._node_data["registered"])
 
-    def test_heartbeat_operation_exception_failure(self):
+    def test_heartbeat_exception_failure(self):
         """Test heartbeat operation when heartbeat request returns an Exception
         Indicates aggregator has encountered an error, heartbeat should fail and next aggregator should be used"""
         DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
@@ -484,7 +488,7 @@ class TestAggregator(unittest.TestCase):
         a.aggregator = "http://example.com"
 
         with mock.patch.object(a, '_send', side_effect=Exception) as send:
-            return_val = a._heartbeat_operation()
+            return_val = a._heartbeat()
 
             self.assertFalse(return_val)
             send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
@@ -492,7 +496,7 @@ class TestAggregator(unittest.TestCase):
             a._mdns_updater.inc_P2P_enable_count.assert_not_called()
             self.assertFalse(a._node_data["registered"])
 
-    def test_heartbeat_operation_if_no_aggregator_set(self):
+    def test_heartbeat_if_no_aggregator_set(self):
         """Test heartbeat operation when no aggregator set
         No heartbeat should be performed and should return False"""
         DUMMYNODEID = "90f7c2c0-cfa9-11e7-9b9d-2fe338e1e7ce"
@@ -502,7 +506,7 @@ class TestAggregator(unittest.TestCase):
         a.aggregator = None
 
         with mock.patch.object(a, '_send', side_effect=Exception) as send:
-            return_val = a._heartbeat_operation()
+            return_val = a._heartbeat()
 
             self.assertFalse(return_val)
             send.assert_not_called()
@@ -527,7 +531,7 @@ class TestAggregator(unittest.TestCase):
         a.mdnsbridge.getHrefWithException.return_value = AGGREGATOR_1
 
         with mock.patch('gevent.sleep') as sleep:
-            with mock.patch.object(a, '_heartbeat_operation', return_value=True) as heartbeat:
+            with mock.patch.object(a, '_heartbeat', return_value=True) as heartbeat:
                 a._discovery_operation()
 
                 sleep.assert_called_once_with(BACKOFF_PERIOD)
@@ -552,7 +556,7 @@ class TestAggregator(unittest.TestCase):
         a.mdnsbridge.getHrefWithException.return_value = AGGREGATOR_1
 
         with mock.patch('gevent.sleep') as sleep:
-            with mock.patch.object(a, '_heartbeat_operation', return_value=True) as heartbeat:
+            with mock.patch.object(a, '_heartbeat', return_value=True) as heartbeat:
                 a._discovery_operation()
 
                 sleep.assert_not_called()
@@ -575,7 +579,7 @@ class TestAggregator(unittest.TestCase):
         a.mdnsbridge.getHrefWithException.side_effect = NoService
 
         with mock.patch('gevent.sleep') as sleep:
-            with mock.patch.object(a, '_heartbeat_operation', return_value=True) as heartbeat:
+            with mock.patch.object(a, '_heartbeat', return_value=True) as heartbeat:
                 a._discovery_operation()
 
                 sleep.assert_not_called()
@@ -599,7 +603,7 @@ class TestAggregator(unittest.TestCase):
         a.mdnsbridge.getHrefWithException.side_effect = EndOfServiceList
 
         with mock.patch('gevent.sleep') as sleep:
-            with mock.patch.object(a, '_heartbeat_operation', return_value=True) as heartbeat:
+            with mock.patch.object(a, '_heartbeat', return_value=True) as heartbeat:
                 a._discovery_operation()
 
                 sleep.assert_not_called()
@@ -624,7 +628,7 @@ class TestAggregator(unittest.TestCase):
         a.mdnsbridge.getHrefWithException.side_effect = [AGGREGATOR_1, AGGREGATOR_2]
 
         with mock.patch('gevent.sleep'):
-            with mock.patch.object(a, '_heartbeat_operation', side_effect=[False, True]) as heartbeat:
+            with mock.patch.object(a, '_heartbeat', side_effect=[False, True]) as heartbeat:
                 a._discovery_operation()
 
                 a.mdnsbridge.updateServices.assert_called_once_with(LEGACY_REG_MDNSTYPE)
@@ -646,7 +650,7 @@ class TestAggregator(unittest.TestCase):
         a._node_data["registered"] = False
         a.aggregator = AGGREGATOR_1
 
-        with mock.patch.object(a, '_heartbeat_operation', return_value=True) as heartbeat:
+        with mock.patch.object(a, '_heartbeat', return_value=True) as heartbeat:
             a._registered_operation()
 
             heartbeat.assert_called_once_with()
@@ -663,7 +667,7 @@ class TestAggregator(unittest.TestCase):
         a._node_data["registered"] = False
         a.aggregator = AGGREGATOR_1
 
-        with mock.patch.object(a, '_heartbeat_operation', return_value=False) as heartbeat:
+        with mock.patch.object(a, '_heartbeat', return_value=False) as heartbeat:
             a._registered_operation()
 
             heartbeat.assert_called_once_with()

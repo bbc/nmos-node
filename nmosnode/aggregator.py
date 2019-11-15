@@ -63,9 +63,9 @@ class Aggregator(object):
     def __init__(self, logger=None, mdns_updater=None):
         self.logger = Logger("aggregator_proxy", logger)
         self.mdnsbridge = IppmDNSBridge(logger=self.logger)
-        self.aggregator_apiversion = _config.get('nodefacade').get('NODE_REGVERSION')
-        self.service_type = LEGACY_REG_MDNSTYPE
-        self._set_api_version(_config.get('nodefacade').get('NODE_REGVERSION'))
+        self.aggregator_apiversion = None
+        self.service_type = None
+        self._set_api_version_and_srv_type(_config.get('nodefacade').get('NODE_REGVERSION'))
         self.aggregator = None
         self.registration_order = ["device", "source", "flow", "sender", "receiver"]
         self._mdns_updater = mdns_updater
@@ -88,8 +88,8 @@ class Aggregator(object):
         self.main_thread = gevent.spawn(self._main_thread)
         self.queue_thread = gevent.spawn(self._process_queue)
 
-    def _set_api_version(self, api_ver):
-        """Set the aggregator api version in use variable and DNS-SD service type based on api version"""
+    def _set_api_version_and_srv_type(self, api_ver):
+        """Set the aggregator api version equal to parameter and DNS-SD service type based on api version"""
         self.aggregator_apiversion = api_ver
         self._set_service_type(api_ver)
 
@@ -107,7 +107,7 @@ class Aggregator(object):
 
         self.logger.writeDebug("Starting heartbeat thread")
         while self._running:
-            if self.aggregator is None:
+            if self._node_data["node"] and self.aggregator is None:
                 self._discovery_operation()
             elif self._node_data["node"] and self._node_data["registered"]:
                 self._registered_operation()
@@ -122,7 +122,9 @@ class Aggregator(object):
         a state of error. Selecting the most appropriate aggregator and try to register with it.
         If a registration fails then another aggregator will be tried."""
         self.logger.writeDebug("Entering Discovery Mode")
+
         # Wait backoff period
+        # Do not wait backoff period if aggregator failed, a new aggregator should be tried immediately
         if not self._aggregator_failure:
             self._back_off_timer()
 
@@ -138,21 +140,23 @@ class Aggregator(object):
                 break
             self.logger.writeDebug("Aggregator set to: {}".format(self.aggregator))
 
-            if self._heartbeat_operation():
-                # Successfully registered Node
+            # Perform initial heartbeat, which will attempt to register Node if not already registered
+            if self._heartbeat():
+                # Successfully registered Node with aggregator andproceed to registered operation
+                # Else will try next aggregator
                 break
 
     def _registered_operation(self):
         """In Registered operation, the Node is registered so a heartbeat will be performed,
         if the heartbeat is successful the Node will wait 5 seconds before attempting another heartbeat.
         Else another aggregator will be selected"""
-        if not self._heartbeat_operation():
+        if not self._heartbeat():
             # Heartbeat failed
-            # Flag to update cached list of aggregators
+            # Flag to update cached list of aggregators and immediately try new aggregator
             self.aggregator = None
             self._aggregator_failure = True
 
-    def _heartbeat_operation(self):
+    def _heartbeat(self):
         """Performs a heartbeat to registered aggregator
         If heartbeat fails it will take actions to correct the error, by re-registering the Node
         If successfull will return True, else will return False"""
@@ -193,9 +197,9 @@ class Aggregator(object):
         except ServerSideError:
             self.logger.writeWarning("Server Side Error on heartbeat. Trying another registry")
             return False
-        except Exception:
+        except Exception as e:
             # Re-register
-            self.logger.writeWarning("Unexpected error on heartbeat. Marking Node for re-registration")
+            self.logger.writeWarning("Unexpected error on heartbeat. Marking Node for re-registration\n{}".format(e))
             self._node_data["registered"] = False
             return False
 
@@ -331,7 +335,7 @@ class Aggregator(object):
             self._increase_backoff_period()
             return None
 
-    def _unregister_node(self, url_path):
+    def _unregister_node(self, url_path=None):
         """Delete node from registry, using url_path if specified"""
         try:
             self._node_data['registered'] = False
@@ -384,6 +388,10 @@ class Aggregator(object):
 
                     elif queue_item["method"] == "DELETE":
                         translated_type = res_type + 's'
+                        if namespace == "resource" and res_type == "node":
+                            # Handle special Node type
+                            self._node_data["node"] = None
+                            self._node_data["registered"] = False
                         try:
                             self._send("DELETE", self.aggregator, self.aggregator_apiversion,
                                        "/{}/{}/{}".format(namespace, translated_type, res_key))
@@ -459,6 +467,8 @@ class Aggregator(object):
         if namespace == "resource" and res_type == "node":
             # Handle special Node type
             self._node_data["node"] = None
+            self._unregister_node()
+            return
         elif res_type in self._node_data["entities"][namespace]:
             self._add_mirror_keys(namespace, res_type)
             if key in self._node_data["entities"][namespace][res_type]:
@@ -491,12 +501,11 @@ class Aggregator(object):
         Timeout, HTTP 5xx, Connection Error - Raise ServerSideError Exception
         HTTP 4xx - Raise InvalidRequest Exception"""
 
-        url = AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + api_ver + url
+        url = "{}/{}/{}{}".format(AGGREGATOR_APINAMESPACE, AGGREGATOR_APINAME, api_ver, url)
 
         try:
             R = self._send_request(method, aggregator, url, data)
             if R is None:
-                # Try another aggregator
                 self.logger.writeWarning("No response from aggregator {}".format(aggregator))
                 raise ServerSideError
 
