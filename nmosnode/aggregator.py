@@ -355,7 +355,8 @@ class Aggregator(object):
                     # Register Node Client
                     self.auth_registry.register_client(client_name=client_name, client_uri=client_uri)
                 except (OSError, IOError):
-                    self.logger.writeError("Exception accessing OAuth credentials. Could not register OAuth2 client.")
+                    self.logger.writeError(
+                        "Exception accessing OAuth credentials. This may be a file permissions issue.")
                     return
                 # Extract the 'RemoteApp' class created when registering
                 self.auth_client = getattr(self.auth_registry, client_name)

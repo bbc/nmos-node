@@ -168,7 +168,8 @@ class AuthRegistry(OAuth):
         self.authorize_url = urljoin(self.auth_url, AUTHORIZATION_ENDPOINT)
         self.client_kwargs = {
             "scope": "is-04",
-            'token_endpoint_auth_method': 'client_secret_basic'
+            'token_endpoint_auth_method': 'client_secret_basic',
+            'code_challenge_method': 'S256'
         }
 
     def fetch_local_token(self):
