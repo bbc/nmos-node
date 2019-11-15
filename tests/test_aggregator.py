@@ -126,17 +126,19 @@ class TestAggregator(unittest.TestCase):
 
         for o in objects:
             a.register(o[0], o[1], **o[2])
-            a._reg_queue.put.assert_called_with({
-                "method": "POST",
-                "namespace": namespace,
-                "res_type": o[0],
-                "key": o[1]})
+
             send_obj = {"type": o[0], "data": {k: v for (k, v) in iteritems(o[2])}}
             if 'id' not in send_obj['data']:
                 send_obj['data']['id'] = o[1]
             if o[0] == "node":
                 self.assertEqual(a._node_data["node"], send_obj)
             else:
+                a._reg_queue.put.assert_called_with({
+                    "method": "POST",
+                    "namespace": namespace,
+                    "res_type": o[0],
+                    "key": o[1]})
+
                 self.assertEqual(a._node_data["entities"][namespace][o[0]][o[1]], send_obj)
 
     def test_unregister(self):
@@ -151,21 +153,20 @@ class TestAggregator(unittest.TestCase):
             ]
 
         for o in objects:
-            a.register(o[0], o[1], **o[2])
-
             with mock.patch.object(a, '_unregister_node') as un_register:
+                a.register(o[0], o[1], **o[2])
+
                 a.unregister(o[0], o[1])
 
                 if o[0] == "node":
                     self.assertIsNone(a._node_data["node"])
-                    un_register.assert_called_once_with()
                 else:
                     un_register.assert_not_called()
                     a._reg_queue.put.assert_called_with({
-                    "method": "DELETE",
-                    "namespace": namespace,
-                    "res_type": o[0],
-                    "key": o[1]})
+                        "method": "DELETE",
+                        "namespace": namespace,
+                        "res_type": o[0],
+                        "key": o[1]})
                     self.assertNotIn(o[1], a._node_data["entities"][namespace][o[0]])
 
     def test_stop(self):
@@ -331,7 +332,7 @@ class TestAggregator(unittest.TestCase):
                                             "/health/nodes/{}".format(DUMMYNODEID))
                     a._mdns_updater.inc_P2P_enable_count.assert_not_called()
                     un_reg.assert_called_once_with('path/xxx')
-                    register.assert_called_once_with()
+                    register.assert_called_once_with(a._node_data["node"])
 
     def test_heartbeat_200_when_not_registered_failure(self):
         """Test heartbeat operation when heartbeat request returns HTTP 200 when not registered
@@ -378,7 +379,7 @@ class TestAggregator(unittest.TestCase):
                                             "/health/nodes/{}".format(DUMMYNODEID))
                     a._mdns_updater.inc_P2P_enable_count.assert_not_called()
                     un_reg.assert_called_once_with('path/xxx')
-                    register.assert_called_once_with()
+                    register.assert_called_once_with(a._node_data["node"])
 
     def test_heartbeat_409_failure(self):
         """Test heartbeat operation when heartbeat request returns HTTP 409 and aggregator in failed state
@@ -419,7 +420,7 @@ class TestAggregator(unittest.TestCase):
                 send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
                                         "/health/nodes/{}".format(DUMMYNODEID))
                 a._mdns_updater.inc_P2P_enable_count.assert_not_called()
-                register.assert_called_once_with()
+                register.assert_called_once_with(a._node_data["node"])
                 self.assertFalse(a._node_data["registered"])
 
     def test_heartbeat_404_failure(self):
@@ -439,7 +440,7 @@ class TestAggregator(unittest.TestCase):
                 send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
                                         "/health/nodes/{}".format(DUMMYNODEID))
                 a._mdns_updater.inc_P2P_enable_count.assert_not_called()
-                register.assert_called_once_with()
+                register.assert_called_once_with(a._node_data["node"])
                 self.assertFalse(a._node_data["registered"])
 
     def test_heartbeat_4xx_failure(self):
@@ -695,7 +696,7 @@ class TestAggregator(unittest.TestCase):
 
         with mock.patch.object(a, '_send', side_effect=request) as send:
             with mock.patch.object(a, '_register_node_resources') as reg_resources:
-                return_val = a._register_node()
+                return_val = a._register_node(a._node_data["node"])
 
                 self.assertTrue(return_val)
                 send.assert_called_once_with("POST", AGGREGATOR_1, a.aggregator_apiversion,
@@ -713,7 +714,7 @@ class TestAggregator(unittest.TestCase):
 
         with mock.patch.object(a, '_send') as send:
             with mock.patch.object(a, '_register_node_resources') as reg_resources:
-                return_val = a._register_node()
+                return_val = a._register_node(None)
 
                 self.assertFalse(return_val)
                 send.assert_not_called()
@@ -741,7 +742,7 @@ class TestAggregator(unittest.TestCase):
         with mock.patch.object(a, '_send', side_effect=request_list) as send:
             with mock.patch.object(a, '_unregister_node', return_value=True) as un_reg:
                 with mock.patch.object(a, '_register_node_resources') as reg_resources:
-                    return_val = a._register_node()
+                    return_val = a._register_node(a._node_data["node"])
 
                     self.assertTrue(return_val)
                     send.assert_called_with("POST", AGGREGATOR_1, a.aggregator_apiversion,
@@ -771,7 +772,7 @@ class TestAggregator(unittest.TestCase):
         with mock.patch.object(a, '_send', side_effect=request_list) as send:
             with mock.patch.object(a, '_unregister_node', return_value=True) as un_reg:
                 with mock.patch.object(a, '_register_node_resources') as reg_resources:
-                    return_val = a._register_node()
+                    return_val = a._register_node(a._node_data["node"])
 
                     self.assertTrue(return_val)
                     send.assert_called_with("POST", AGGREGATOR_1, a.aggregator_apiversion,
@@ -794,7 +795,7 @@ class TestAggregator(unittest.TestCase):
         a._node_data["node"] = {"type": "node", "data": {"id": DUMMYNODEID}}
 
         with mock.patch.object(a, '_send', side_effect=Exception) as send:
-            return_val = a._register_node()
+            return_val = a._register_node(a._node_data["node"])
 
             self.assertFalse(return_val)
             send.assert_called_with("POST", AGGREGATOR_1, a.aggregator_apiversion,
@@ -820,7 +821,7 @@ class TestAggregator(unittest.TestCase):
         with mock.patch.object(a, '_send', side_effect=request_response) as send:
             with mock.patch.object(a, '_unregister_node', return_value=False) as un_reg:
 
-                return_val = a._register_node()
+                return_val = a._register_node(a._node_data["node"])
 
                 self.assertFalse(return_val)
                 send.assert_called_with("POST", AGGREGATOR_1, a.aggregator_apiversion,
@@ -859,7 +860,7 @@ class TestAggregator(unittest.TestCase):
 
         with mock.patch.object(a, '_send', side_effect=request_response) as send:
             with mock.patch.object(a, '_register_node_resources') as reg_resources:
-                return_val = a._register_node()
+                return_val = a._register_node(a._node_data["node"])
 
                 self.assertTrue(return_val)
                 send.assert_called_with("POST", AGGREGATOR_1, a.aggregator_apiversion,
@@ -1073,6 +1074,8 @@ class TestAggregator(unittest.TestCase):
 
         expected_calls = [
             mock.call('POST', "www.example.com", "v1.2", '/resource',
+                      a._node_data["node"]),
+            mock.call('POST', "www.example.com", "v1.2", '/resource',
                       a._node_data["entities"]["resource"]["dummy"][DUMMYKEY]),
             mock.call('DELETE', "www.example.com", "v1.2", '/resource/dummys/' + DUMMYKEY)
             ]
@@ -1081,11 +1084,9 @@ class TestAggregator(unittest.TestCase):
             a._running = False
 
         with mock.patch('gevent.sleep', side_effect=killloop):
-            with mock.patch.object(a, '_register_node') as register:
-                with mock.patch.object(a, '_send') as send:
-                    a._process_queue()
-                    register.assert_called_once_with()
-                    send.assert_has_calls(expected_calls)
+            with mock.patch.object(a, '_send') as send:
+                a._process_queue()
+                send.assert_has_calls(expected_calls)
 
     def test_process_queue_processes_queue_when_not_running(self):
         """The process queue method should continue until the queue is empty even if the object has been instructed
@@ -1119,21 +1120,21 @@ class TestAggregator(unittest.TestCase):
 
         expected_calls = [
             mock.call('POST', "www.example.com", "v1.2", '/resource',
+                      a._node_data["node"]),
+            mock.call('POST', "www.example.com", "v1.2", '/resource',
                       a._node_data["entities"]["resource"]["dummy"][DUMMYKEY]),
             mock.call('DELETE', "www.example.com", "v1.2", '/resource/dummys/' + DUMMYKEY)
             ]
 
         with mock.patch('gevent.sleep', side_effect=Exception) as sleep:
-            with mock.patch.object(a, '_register_node') as register:
-                with mock.patch.object(a, '_send') as send:
-                    try:
-                        a._process_queue()
-                    except Exception:
-                        self.fail(msg="process_queue kept running")
+            with mock.patch.object(a, '_send') as send:
+                try:
+                    a._process_queue()
+                except Exception:
+                    self.fail(msg="process_queue kept running")
 
-                    send.assert_has_calls(expected_calls)
-                    register.assert_called_once_with()
-                    sleep.assert_not_called()
+                send.assert_has_calls(expected_calls)
+                sleep.assert_not_called()
 
     def test_process_queue_processes_queue_when_running_and_aborts_on_exception_in_general_register(self):
         """If a non-node register performed by the queue processing thread throws an exception then the loop

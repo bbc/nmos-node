@@ -69,8 +69,8 @@ class Aggregator(object):
         self.aggregator = None
         self.registration_order = ["device", "source", "flow", "sender", "receiver"]
         self._mdns_updater = mdns_updater
-        # '_node_data' is a local mirror of aggregated items. There are helper methods
-        # for manipulating this below.
+        self.node_data_lock = gevent.lock.Semaphore()
+        # '_node_data' is a local mirror of aggregated items.
         self._node_data = {
             'node': None,
             'registered': False,
@@ -104,8 +104,8 @@ class Aggregator(object):
         """The main thread runs in the background.
         If when it runs the Node is believed to be registered it will perform a heartbeat every 5 seconds.
         If the Node is not registered it will try register the Node"""
+        self.logger.writeDebug("Starting main thread")
 
-        self.logger.writeDebug("Starting heartbeat thread")
         while self._running:
             if self._node_data["node"] and self.aggregator is None:
                 self._discovery_operation()
@@ -114,6 +114,7 @@ class Aggregator(object):
             else:
                 self._node_data["registered"] = False
                 self.aggregator = None
+                gevent.sleep(0.2)
 
         self.logger.writeDebug("Stopping heartbeat thread")
 
@@ -133,6 +134,7 @@ class Aggregator(object):
         # Update cached list of aggregators
         if self._aggregator_list_stale:
             self._flush_cached_aggregators()
+
         while True:
             self.aggregator = self._get_aggregator()
             if self.aggregator is None:
@@ -180,7 +182,7 @@ class Aggregator(object):
             elif R.status_code in [200, 409]:
                 # Delete node from registry
                 if self._unregister_node(R.headers.get('Location')):
-                    return self._register_node()
+                    return self._register_node(self._node_data["node"])
                 else:
                     # Try next registry
                     return False
@@ -190,7 +192,7 @@ class Aggregator(object):
                 # Re-register
                 self.logger.writeWarning("404 error on heartbeat. Marking Node for re-registration")
                 self._node_data["registered"] = False
-                return self._register_node()
+                return self._register_node(self._node_data["node"])
             else:
                 # Other error, try next registry
                 return False
@@ -203,13 +205,12 @@ class Aggregator(object):
             self._node_data["registered"] = False
             return False
 
-    def _register_node(self):
+    def _register_node(self, node_obj):
         """Attempt to register Node with aggregator
         Returns True is node was successfully registered with aggregator
         Returns False if registration failed
         If registration failed with 200 or 409, will attempt to delete and re-register"""
-        if self._node_data.get("node", None) is None:
-            self.logger.writeDebug("No node data to register, register returning")
+        if node_obj is None:
             return False
 
         # Drain the queue
@@ -223,7 +224,7 @@ class Aggregator(object):
             # Try register the Node 3 times with aggregator before failing back to next aggregator
             for i in range(0, 3):
                 R = self._send("POST", self.aggregator, self.aggregator_apiversion,
-                               "/resource", self._node_data["node"])
+                               "/resource", node_obj)
 
                 if R.status_code == 201:
                     # Continue to registered operation
@@ -337,6 +338,9 @@ class Aggregator(object):
 
     def _unregister_node(self, url_path=None):
         """Delete node from registry, using url_path if specified"""
+        if self.aggregator is None:
+            self.logger.writeWarning('Could not un-register as no aggregator set')
+            return False
         try:
             self._node_data['registered'] = False
             if url_path is None:
@@ -374,16 +378,21 @@ class Aggregator(object):
                     res_type = queue_item["res_type"]
                     res_key = queue_item["key"]
                     if queue_item["method"] == "POST":
-                        if res_type == "node":
-                            self._register_node()
-                        elif res_key in self._node_data["entities"][namespace][res_type]:
-                            data = self._node_data["entities"][namespace][res_type][res_key]
+                        with self.node_data_lock:
+                            if res_type == "node":
+                                send_obj = self._node_data.get("node")
+                            else:
+                                send_obj = self._node_data["entities"][namespace][res_type].get(res_key)
+
+                            if send_obj is None:
+                                self.logger.writeError("Not data to send for resource {}".format(res_type))
+                                continue
                             try:
                                 self._send("POST", self.aggregator, self.aggregator_apiversion,
-                                           "/{}".format(namespace), data)
+                                           "/{}".format(namespace), send_obj)
                             except InvalidRequest as e:
                                 self.logger.writeWarning("Error registering {} {}: {}".format(res_type, res_key, e))
-                                self.logger.writeWarning("Request data: {}".format(data))
+                                self.logger.writeWarning("Request data: {}".format(send_obj))
                                 del self._node_data["entities"][namespace][res_type][res_key]
 
                     elif queue_item["method"] == "DELETE":
@@ -405,7 +414,9 @@ class Aggregator(object):
                     self.aggregator = None
                     self._aggregator_failure = True
                     self._add_request_to_front_of_queue(queue_item)
-                except Exception:
+                except Exception as e:
+                    self.logger.writeError("Unexpected Error while processing queue, marking Node for re-registration\n"
+                                           "{}".format(e))
                     self._node_data["registered"] = False
                     self.aggregator = None
                     if(self._mdns_updater is not None):
@@ -455,19 +466,26 @@ class Aggregator(object):
             send_obj["data"]["id"] = key
 
         if namespace == "resource" and res_type == "node":
-            # Handle special Node type
-            self._node_data["node"] = send_obj
+            # Handle special Node type when Node is not registered, by immediately registering
+            if self._node_data["node"] is None:
+                # Will trigger registration in main thread
+                self._node_data["node"] = send_obj
+                return
+            # Update Node Data
+            with self.node_data_lock:
+                self._node_data["node"] = send_obj
         else:
             self._add_mirror_keys(namespace, res_type)
-            self._node_data["entities"][namespace][res_type][key] = send_obj
+            with self.node_data_lock:
+                self._node_data["entities"][namespace][res_type][key] = send_obj
         self._queue_request("POST", namespace, res_type, key)
 
     def unregister_from(self, namespace, res_type, key):
         """General unregister method for 'resource' types"""
         if namespace == "resource" and res_type == "node":
             # Handle special Node type
-            self._node_data["node"] = None
             self._unregister_node()
+            self._node_data["node"] = None
             return
         elif res_type in self._node_data["entities"][namespace]:
             self._add_mirror_keys(namespace, res_type)
@@ -477,10 +495,11 @@ class Aggregator(object):
 
     def _add_mirror_keys(self, namespace, res_type):
         """Deal with missing keys in local mirror"""
-        if namespace not in self._node_data["entities"]:
-            self._node_data["entities"][namespace] = {}
-        if res_type not in self._node_data["entities"][namespace]:
-            self._node_data["entities"][namespace][res_type] = {}
+        with self.node_data_lock:
+            if namespace not in self._node_data["entities"]:
+                self._node_data["entities"][namespace] = {}
+            if res_type not in self._node_data["entities"][namespace]:
+                self._node_data["entities"][namespace][res_type] = {}
 
     def stop(self):
         """Stop the Aggregator object running"""
