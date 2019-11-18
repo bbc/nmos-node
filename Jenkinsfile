@@ -123,6 +123,56 @@ pipeline {
                 }
             }
         }
+        stage ("Integration Tests") {
+            stages {
+                stage ("Start Test Environment") {
+                    steps {
+                        script {
+                            env.int_result = "FAILURE"
+                            if (env.CHANGE_BRANCH != null) {
+                                env.NMOS_RI_NODE_BRANCH = env.CHANGE_BRANCH
+                            } else {
+                                env.NMOS_RI_NODE_BRANCH = env.BRANCH_NAME
+                            }
+                        }
+                        bbcGithubNotify(context: "tests/integration", status: "PENDING")
+                        sh 'rm -r nmos-joint-ri || :'
+                        withBBCGithubSSHAgent{
+                            sh 'git clone git@github.com:bbc/nmos-joint-ri.git'
+                        }
+                        dir ('nmos-joint-ri/vagrant') {
+                            sh 'vagrant up --provision'
+                        }
+                    }
+                }
+                stage ("Run Integration Tests") {
+                    steps {
+                        dir ('nmos-joint-ri') {
+                            bbcVagrantFindPorts(vagrantDir: "vagrant")
+                            sh 'python3 -m unittest discover'
+                        }
+                        script {
+                            env.int_result = "SUCCESS"
+                        }
+                    }
+                }
+                stage ("Analyse JUnit files") {
+                    steps {
+                        dir ('nmos-joint-ri') {
+                            junit 'tests/*.xml'
+                        }
+                    }
+                }
+            }
+            post {
+                always {
+                    dir ('nmos-joint-ri/vagrant') {
+                        sh 'vagrant destroy -f'
+                    }
+                    bbcGithubNotify(context: "tests/integration", status: env.int_result)
+                }
+            }
+        }
         stage ("Debian Source Build") {
             steps {
                 script {
