@@ -387,7 +387,7 @@ class Aggregator(object):
                             continue
                         try:
                             self._send("POST", self.aggregator, self.aggregator_apiversion,
-                                        "/{}".format(namespace), send_obj)
+                                       "/{}".format(namespace), send_obj)
                         except InvalidRequest as e:
                             self.logger.writeWarning("Error registering {} {}: {}".format(res_type, res_key, e))
                             self.logger.writeWarning("Request data: {}".format(send_obj))
