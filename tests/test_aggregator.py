@@ -22,6 +22,7 @@ import unittest
 import mock
 import requests
 import gevent
+from copy import deepcopy
 from nmosnode.aggregator import Aggregator, InvalidRequest, REGISTRATION_MDNSTYPE
 from nmosnode.aggregator import AGGREGATOR_APINAMESPACE, LEGACY_REG_MDNSTYPE, AGGREGATOR_APINAME
 from nmosnode.aggregator import ServerSideError
@@ -1243,7 +1244,7 @@ class TestAggregator(unittest.TestCase):
             {"method": "POST", "namespace": "resource", "res_type": "dummy", "key": DUMMYKEY},
             {"method": "POST", "namespace": "resource", "res_type": "left", "key": DUMMYKEY},
         ]
-        queue = expected_queue.copy()
+        queue = deepcopy(expected_queue)
         updated_queue = []
 
         a._reg_queue.empty.side_effect = lambda: (len(queue) == 0)
