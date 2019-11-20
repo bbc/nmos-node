@@ -1,5 +1,9 @@
 # NMOS Node API Implementation Changelog
 
+## 0.11.0
+- Add exponential backoff when registration APIs return HTTP 500 responses
+- Add support for un-registering when requests return HTTP 409 responses
+
 ## 0.10.11
 - Alter executable to run using Python3, alter `stdeb` to replace python 2 package
 

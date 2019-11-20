@@ -34,6 +34,7 @@ Use ^D to exit this console to quit.""")
             print("Opening Debug console on port {}".format(args.interactive))
             try:
                 backdoor.serve_forever()
+
             except Exception:
                 global die
                 die = True
