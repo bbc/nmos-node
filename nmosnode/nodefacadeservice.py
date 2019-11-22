@@ -119,12 +119,7 @@ class NodeFacadeService:
                 self.dns_sd_port = DNS_SD_HTTP_PORT
                 self.protocol = "http"
             self.mdns_updater = MDNSUpdater(
-                self.mdns,
-                DNS_SD_TYPE,
-                DNS_SD_NAME,
-                self.mappings,
-                self.dns_sd_port,
-                self.logger,
+                self.mdns, DNS_SD_TYPE, DNS_SD_NAME, self.mappings, self.dns_sd_port, self.logger,
                 txt_recs=self._mdns_txt(NODE_APIVERSIONS, self.protocol, OAUTH_MODE)
             )
 
@@ -151,12 +146,13 @@ class NodeFacadeService:
             )
 
     def generate_endpoints(self):
-        endpoints = {
+        endpoints = []
+        endpoints.append({
             "host": HOST,
             "port": self.dns_sd_port,  # Everything should go via apache proxy
             "protocol": self.protocol,
             "authorization": OAUTH_MODE
-        }
+        })
         return endpoints
 
     def generate_href(self):

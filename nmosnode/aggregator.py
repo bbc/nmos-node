@@ -607,6 +607,7 @@ class Aggregator(object):
             elif (resp.status_code // 100) == 4:
                 self.logger.writeWarning("{} response from aggregator: {} {}"
                                          .format(resp.status_code, method, urljoin(aggregator, url)))
+                self.logger.writeDebug("\nResponse: {}".format(resp.content))
                 raise InvalidRequest(resp.status_code)
 
             else:
@@ -631,7 +632,7 @@ class Aggregator(object):
         # to web clients - so, sacrifice a little timeliness for things working as designed the
         # majority of the time...
         kwargs = {
-            "method": method, "url": url, "data": data, "timeout": 1.0
+            "method": method, "url": url, "json": data, "timeout": 1.0
         }
         if _config.get('prefer_ipv6') is True:
             kwargs["proxies"] = {'http': ''}
