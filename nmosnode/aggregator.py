@@ -596,22 +596,22 @@ class Aggregator(object):
         url = "{}/{}/{}".format(AGGREGATOR_APIROOT, api_ver, url)
 
         try:
-            R = self._send_request(method, aggregator, url, data)
-            if R is None:
+            resp = self._send_request(method, aggregator, url, data)
+            if resp is None:
                 self.logger.writeWarning("No response from aggregator {}".format(aggregator))
                 raise ServerSideError
 
-            elif R.status_code in [200, 201, 204, 409]:
-                return R
+            elif resp.status_code in [200, 201, 204, 409]:
+                return resp
 
-            elif (R.status_code // 100) == 4:
+            elif (resp.status_code // 100) == 4:
                 self.logger.writeWarning("{} response from aggregator: {} {}"
-                                         .format(R.status_code, method, urljoin(aggregator, url)))
-                raise InvalidRequest(R.status_code)
+                                         .format(resp.status_code, method, urljoin(aggregator, url)))
+                raise InvalidRequest(resp.status_code)
 
             else:
                 self.logger.writeWarning("Unexpected status from aggregator {}: {}, {}"
-                                         .format(aggregator, R.status_code, R.content))
+                                         .format(aggregator, resp.status_code, resp.content))
                 raise ServerSideError
 
         except requests.exceptions.RequestException as e:
