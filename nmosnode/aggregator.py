@@ -31,14 +31,24 @@ from nmoscommon.logger import Logger # noqa E402
 from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException # noqa E402
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge, NoService, EndOfServiceList # noqa E402
 
+from .api import NODE_APIROOT # noqa E402
+from .authclient import AuthRegistrar # noqa E402
+
 AGGREGATOR_APINAMESPACE = "x-nmos"
 AGGREGATOR_APINAME = "registration"
+AGGREGATOR_APIROOT = AGGREGATOR_APINAMESPACE + '/' + AGGREGATOR_APINAME
 
 LEGACY_REG_MDNSTYPE = "nmos-registration"
 REGISTRATION_MDNSTYPE = "nmos-register"
 
+# Exponential back off global vars
 BACKOFF_INITIAL_TIMOUT_SECONDS = 5
 BACKOFF_MAX_TIMEOUT_SECONDS = 40
+
+# OAuth client global vars
+OAUTH_MODE = _config.get("oauth_mode", False)
+ALLOWED_GRANTS = ["authorization_code", "refresh_token", "client_credentials"]
+ALLOWED_SCOPE = "is-04"
 
 
 class InvalidRequest(Exception):
@@ -163,7 +173,7 @@ class Aggregator(object):
             return False
         try:
             R = self._send("POST", self.aggregator, self.aggregator_apiversion,
-                           "/health/nodes/{}".format(self._node_data["node"]["data"]["id"]))
+                           "health/nodes/{}".format(self._node_data["node"]["data"]["id"]))
 
             if R.status_code == 200 and self._node_data["registered"]:
                 # Continue to registered operation
@@ -221,7 +231,7 @@ class Aggregator(object):
             # Try register the Node 3 times with aggregator before failing back to next aggregator
             for i in range(0, 3):
                 R = self._send("POST", self.aggregator, self.aggregator_apiversion,
-                               "/resource", node_obj)
+                               "resource", node_obj)
 
                 if R.status_code == 201:
                     # Continue to registered operation
@@ -344,7 +354,7 @@ class Aggregator(object):
             self._node_data['registered'] = False
             if url_path is None:
                 R = self._send('DELETE', self.aggregator, self.aggregator_apiversion,
-                               '/resource/nodes/{}'.format(self._node_data['node']["data"]["id"]))
+                               'resource/nodes/{}'.format(self._node_data['node']["data"]["id"]))
             else:
                 parsed_url = urlparse(url_path)
                 R = self._send_request('DELETE', self.aggregator, parsed_url.path)
@@ -389,7 +399,7 @@ class Aggregator(object):
                             continue
                         try:
                             self._send("POST", self.aggregator, self.aggregator_apiversion,
-                                       "/{}".format(namespace), send_obj)
+                                       "{}".format(namespace), send_obj)
                             self.logger.writeInfo("Registered {} {} {}".format(namespace, res_type, res_key))
                         except InvalidRequest as e:
                             self.logger.writeWarning("Error registering {} {}: {}".format(res_type, res_key, e))
@@ -404,7 +414,7 @@ class Aggregator(object):
                             self._node_data["registered"] = False
                         try:
                             self._send("DELETE", self.aggregator, self.aggregator_apiversion,
-                                       "/{}/{}/{}".format(namespace, translated_type, res_key))
+                                       "{}/{}/{}".format(namespace, translated_type, res_key))
                             self.logger.writeInfo("Un-registered {} {} {}".format(namespace, translated_type, res_key))
                         except InvalidRequest as e:
                             self.logger.writeWarning("Error deleting resource {} {}: {}"
@@ -514,12 +524,12 @@ class Aggregator(object):
                 "registered": self._node_data["registered"]}
 
     def _send(self, method, aggregator, api_ver, url, data=None):
-        """Handle sending request to the registration API, with error handelling
+        """Handle sending request to the registration API, with error handling
         HTTP 200, 201, 204, 409 - Success, return response
         Timeout, HTTP 5xx, Connection Error - Raise ServerSideError Exception
         HTTP 4xx - Raise InvalidRequest Exception"""
 
-        url = "{}/{}/{}{}".format(AGGREGATOR_APINAMESPACE, AGGREGATOR_APINAME, api_ver, url)
+        url = "{}/{}/{}".format(AGGREGATOR_APIROOT, api_ver, url)
 
         try:
             R = self._send_request(method, aggregator, url, data)
