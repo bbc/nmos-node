@@ -21,10 +21,14 @@ import requests # noqa E402
 import traceback # noqa E402
 import json # noqa E402
 import time # noqa E402
+import webbrowser  # noqa E402
 
 from six import itervalues # noqa E402
 from six.moves.urllib.parse import urljoin, urlparse # noqa E402
 from collections import deque # noqa E402
+from socket import getfqdn  # noqa E402
+from authlib.oauth2.rfc6750 import InvalidTokenError # noqa E402
+from authlib.oauth2 import OAuth2Error # noqa E402
 
 from nmoscommon.nmoscommonconfig import config as _config # noqa E402
 from nmoscommon.logger import Logger # noqa E402
@@ -68,7 +72,7 @@ class Aggregator(object):
     """This class serves as a proxy for the distant aggregation service running elsewhere on the network.
     It will search out aggregators and locate them, falling back to other ones if the one it is connected to
     disappears, and resending data as needed."""
-    def __init__(self, logger=None, mdns_updater=None):
+    def __init__(self, logger=None, mdns_updater=None, auth_registry=None):
         self.logger = Logger("aggregator_proxy", logger)
         self.mdnsbridge = IppmDNSBridge(logger=self.logger)
         self.aggregator_apiversion = None
@@ -81,19 +85,25 @@ class Aggregator(object):
         self._node_data = {
             'node': None,
             'registered': False,
+            'auth_client_registered': False,
             'entities': {
                 'resource': {
                 }
             }
         }
+        self._reg_queue = gevent.queue.Queue()
+        self.main_thread = gevent.spawn(self._main_thread)
+        self.queue_thread = gevent.spawn(self._process_queue)
+
         self._running = True
         self._aggregator_list_stale = True
         self._aggregator_failure = False  # Variable to flag when aggregator has returned and unexpected error
         self._backoff_active = False
         self._backoff_period = 0
-        self._reg_queue = gevent.queue.Queue()
-        self.main_thread = gevent.spawn(self._main_thread)
-        self.queue_thread = gevent.spawn(self._process_queue)
+
+        self.auth_registrar = None  # Class responsible for registering with Auth Server
+        self.auth_registry = auth_registry  # Top level class that tracks locally registered OAuth clients
+        self.auth_client = None  # Instance of Oauth client responsible for performing token requests
 
     def _set_api_version_and_srv_type(self, api_ver):
         """Set the aggregator api version equal to parameter and DNS-SD service type based on api version"""
@@ -109,8 +119,8 @@ class Aggregator(object):
 
     def _main_thread(self):
         """The main thread runs in the background.
-        If when it runs the Node is believed to be registered it will perform a heartbeat every 5 seconds.
-        If the Node is not registered it will try register the Node"""
+        If, when it runs, the Node is believed to be registered it will perform a heartbeat every 5 seconds.
+        If the Node is not registered it will try to register the Node"""
         self.logger.writeDebug("Starting main thread")
 
         while self._running:
@@ -211,6 +221,19 @@ class Aggregator(object):
             self.logger.writeWarning("Unexpected error on heartbeat. Marking Node for re-registration\n{}".format(e))
             self._node_data["registered"] = False
             return False
+
+    def _register_auth(self, client_name, client_uri):
+        """Register OAuth client with Authorization Server"""
+        auth_registrar = AuthRegistrar(
+            client_name=client_name,
+            redirect_uri='http://' + getfqdn() + NODE_APIROOT + 'authorize',
+            client_uri=client_uri,
+            allowed_scope=ALLOWED_SCOPE,
+            allowed_grant=ALLOWED_GRANTS
+        )
+        if auth_registrar.registered is True:
+            self._registered['auth_client_registered'] = True
+            return auth_registrar
 
     def _register_node(self, node_obj):
         """Attempt to register Node with aggregator
@@ -460,6 +483,47 @@ class Aggregator(object):
             except IndexError:
                 break
 
+    def register_auth_client(self, node_object):
+        """Function for Registering OAuth client with Auth Server and instantiating OAuth Client class"""
+
+        if OAUTH_MODE is True:
+            client_name = node_object['data']['description']
+            client_uri = 'http://' + node_object['data']['label']
+            if self.auth_registrar is None:
+                self.auth_registrar = self._auth_register(
+                    client_name=client_name,
+                    client_uri=client_uri
+                )
+            if self._registered['auth_client_registered'] and self.auth_client is None:
+                try:
+                    # Register Node Client
+                    self.auth_registry.register_client(client_name=client_name, client_uri=client_uri)
+                except (OSError, IOError):
+                    self.logger.writeError(
+                        "Exception accessing OAuth credentials. This may be a file permissions issue.")
+                    return
+                # Extract the 'RemoteApp' class created when registering
+                self.auth_client = getattr(self.auth_registry, client_name)
+                # Fetch Token
+                self.get_auth_token()
+
+    def get_auth_token(self):
+        """Fetch Access Token either using redirection grant flow or using auth_client"""
+        if self.auth_client is not None and self.auth_registrar is not None:
+            try:
+                if "authorization_code" in self.auth_registrar.allowed_grant:
+                    # Open browser at endpoint for redirecting to Auth Server's /authorize endpoint
+                    webbrowser.open("http://" + getfqdn() + NODE_APIROOT + "login")
+                elif "client_credentials" in self.auth_registrar.allowed_grant:
+                    # Fetch Token
+                    token = self.auth_client.fetch_access_token()
+                    # Store token in member variable to be extracted using `fetch_local_token` function
+                    self.auth_registry.bearer_token = token
+                else:
+                    raise OAuth2Error("Client registered with unsupported Grant Type")
+            except OAuth2Error as e:
+                self.logger.writeError("Failure fetching access token. {}".format(e))
+
     def register(self, res_type, key, **kwargs):
         """Register 'resource' type data including the Node
            NB: Node registration is managed by heartbeat thread so may take up to 5 seconds! """
@@ -555,20 +619,44 @@ class Aggregator(object):
             self.logger.writeWarning("{} from aggregator {}".format(e, aggregator))
             raise ServerSideError
 
-    def _send_request(self, method, aggregator, url, data=None):
+    def _send_request(self, method, aggregator, url_path, data=None):
         """Low level method to send a HTTP request"""
 
-        self.logger.writeDebug("{} {}".format(method, urljoin(aggregator, url)))
+        url = urljoin(aggregator, url_path)
+        self.logger.writeDebug("{} {}".format(method, url))
 
         # We give a long(ish) timeout below, as the async request may succeed after the timeout period
         # has expired, causing the node to be registered twice (potentially at different aggregators).
         # Whilst this isn't a problem in practice, it may cause excessive churn in websocket traffic
         # to web clients - so, sacrifice a little timeliness for things working as designed the
         # majority of the time...
-        if _config.get('prefer_ipv6') is False:
-            return requests.request(method, urljoin(aggregator, url), json=data, timeout=1.0)
+        kwargs = {
+            "method": method, "url": url, "data": data, "timeout": 1.0
+        }
+        if _config.get('prefer_ipv6') is True:
+            kwargs["proxies"] = {'http': ''}
+
+        # If not in OAuth mode, perform standard request
+        if OAUTH_MODE is False or self.auth_client is None:
+            return requests.request(**kwargs)
         else:
-            return requests.request(method, urljoin(aggregator, url), json=data, timeout=1.0, proxies={'http': ''})
+            # If in OAuth Mode, use OAuth client to automatically fetch token / refresh token if expired
+            with self.auth_registry.app.app_context():
+                try:
+                    return self.auth_client.request(**kwargs)
+                # Request may fail if access token (client credentials) or refresh token (auth code) has expired
+                except InvalidTokenError:
+                    self.logger.writeWarning("Invalid Token. Requesting new Token.")
+                    self.get_auth_token()
+                    try:
+                        return self.auth_client.request(**kwargs)  # Resend the request
+                    except Exception as e:
+                        self.logger.writeError("Error re-requesting token: {}. Removing Auth Client".format(e))
+                        self.auth_client = None
+                # General OAuth Error (e.g. incorrect request details, invalid client, etc.)
+                except OAuth2Error as e:
+                    self.logger.writeError(
+                        "Failed to fetch token before making API call to {}. Error: {}".format(url, e))
 
 
 class MDNSUpdater(object):
