@@ -12,26 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import gevent
 from gevent import monkey
 monkey.patch_all()
 
-from six import itervalues # noqa E402
-from six.moves.urllib.parse import urljoin, urlparse # noqa E402
-
-from collections import deque # noqa E402
+import gevent # noqa E402
+import gevent.queue # noqa E402
 import requests # noqa E402
+import traceback # noqa E402
 import json # noqa E402
 import time # noqa E402
 
-import gevent.queue # noqa E402
-
-from nmoscommon.logger import Logger # noqa E402
-from mdnsbridge.mdnsbridgeclient import IppmDNSBridge, NoService, EndOfServiceList # noqa E402
-from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException # noqa E402
+from six import itervalues # noqa E402
+from six.moves.urllib.parse import urljoin, urlparse # noqa E402
+from collections import deque # noqa E402
 
 from nmoscommon.nmoscommonconfig import config as _config # noqa E402
-import traceback # noqa E402
+from nmoscommon.logger import Logger # noqa E402
+from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException # noqa E402
+from mdnsbridge.mdnsbridgeclient import IppmDNSBridge, NoService, EndOfServiceList # noqa E402
 
 AGGREGATOR_APINAMESPACE = "x-nmos"
 AGGREGATOR_APINAME = "registration"
@@ -326,14 +324,14 @@ class Aggregator(object):
             return self.mdnsbridge.getHrefWithException(self.service_type, None, self.aggregator_apiversion, protocol)
         except NoService:
             self.logger.writeDebug("No Registration services found: {} {} {}".format(
-                                    self.service_type, self.aggregator_apiversion, protocol))
+                self.service_type, self.aggregator_apiversion, protocol))
             if self._mdns_updater is not None:
                 self._mdns_updater.inc_P2P_enable_count()
             self._increase_backoff_period()
             return None
         except EndOfServiceList:
             self.logger.writeDebug("End of Registration services list: {} {} {}".format(
-                                    self.service_type, self.aggregator_apiversion, protocol))
+                self.service_type, self.aggregator_apiversion, protocol))
             self._increase_backoff_period()
             return None
 
@@ -369,10 +367,10 @@ class Aggregator(object):
         self.logger.writeDebug("Starting HTTP queue processing thread")
         # Checks queue not empty before quitting to make sure unregister node gets done
         while self._running:
-            if (not self._node_data["registered"] or
-                    self._reg_queue.empty() or
-                    self._backoff_active or
-                    not self.aggregator):
+            if (not self._node_data["registered"]
+                    or self._reg_queue.empty()
+                    or self._backoff_active
+                    or not self.aggregator):
                 gevent.sleep(1)
             else:
                 try:
@@ -618,7 +616,7 @@ class MDNSUpdater(object):
                 self._mdns_update_queue.put(self._p2p_txt_recs())
 
     def _increment_service_version(self, type):
-        self.service_versions[self.mappings[type]] = self.service_versions[self.mappings[type]]+1
+        self.service_versions[self.mappings[type]] = self.service_versions[self.mappings[type]] + 1
         if self.service_versions[self.mappings[type]] > 255:
             self.service_versions[self.mappings[type]] = 0
 
