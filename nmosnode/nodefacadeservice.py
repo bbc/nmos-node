@@ -43,15 +43,11 @@ from nmoscommon.httpserver import HttpServer # noqa E402
 from nmoscommon.utils import get_node_id, translate_api_version, getLocalIP # noqa E402
 from nmoscommon.nmoscommonconfig import config as _config # noqa E402
 
-from .api import NODE_APIVERSIONS # noqa E402
-from .api import NODE_REGVERSION # noqa E402
-from .api import FacadeAPI # noqa E402
+from .api import NODE_APIVERSIONS, NODE_REGVERSION, FacadeAPI # noqa E402
 from .registry import FacadeRegistry, FacadeRegistryCleaner # noqa E402
-from .aggregator import Aggregator # noqa E402
-from .aggregator import MDNSUpdater # noqa E402
+from .aggregator import Aggregator, MDNSUpdater # noqa E402
 from .authclient import AuthRegistry # noqa E402
 from .serviceinterface import FacadeInterface # noqa E402
-
 
 NS = 'urn:x-bbcrd:ips:ns:0.1'
 PORT = 12345
