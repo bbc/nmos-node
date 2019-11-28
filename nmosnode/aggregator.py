@@ -104,6 +104,9 @@ class Aggregator(object):
         self.auth_registrar = None  # Class responsible for registering with Auth Server
         self.auth_registry = auth_registry  # Top level class that tracks locally registered OAuth clients
         self.auth_client = None  # Instance of Oauth client responsible for performing token requests
+        # Something like...
+        if OAUTH_MODE is True:
+            self.register_auth_client("Node on {}".format(getfqdn(), getfqdn()))
 
     def _set_api_version_and_srv_type(self, api_ver):
         """Set the aggregator api version equal to parameter and DNS-SD service type based on api version"""
