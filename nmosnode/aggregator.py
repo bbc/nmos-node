@@ -50,6 +50,7 @@ BACKOFF_INITIAL_TIMOUT_SECONDS = 5
 BACKOFF_MAX_TIMEOUT_SECONDS = 40
 
 # OAuth client global vars
+HOSTNAME = getfqdn()
 OAUTH_MODE = _config.get("oauth_mode", False)
 ALLOWED_GRANTS = ["authorization_code", "refresh_token", "client_credentials"]
 ALLOWED_SCOPE = "is-04"
@@ -104,9 +105,6 @@ class Aggregator(object):
         self.auth_registrar = None  # Class responsible for registering with Auth Server
         self.auth_registry = auth_registry  # Top level class that tracks locally registered OAuth clients
         self.auth_client = None  # Instance of Oauth client responsible for performing token requests
-        # Something like...
-        if OAUTH_MODE is True:
-            self.register_auth_client("Node on {}".format(getfqdn(), getfqdn()))
 
     def _set_api_version_and_srv_type(self, api_ver):
         """Set the aggregator api version equal to parameter and DNS-SD service type based on api version"""
@@ -221,22 +219,25 @@ class Aggregator(object):
             return False
         except Exception as e:
             # Re-register
-            self.logger.writeWarning("Unexpected error on heartbeat. Marking Node for re-registration\n{}".format(e))
+            self.logger.writeWarning("Unexpected error on heartbeat: {}. Marking Node for re-registration".format(e))
             self._node_data["registered"] = False
             return False
 
     def _register_auth(self, client_name, client_uri):
         """Register OAuth client with Authorization Server"""
+        self.logger.writeInfo("Attempting to register dynamically with Auth Server")
         auth_registrar = AuthRegistrar(
             client_name=client_name,
-            redirect_uri='http://' + getfqdn() + NODE_APIROOT + 'authorize',
+            redirect_uri='http://' + HOSTNAME + NODE_APIROOT + 'authorize',
             client_uri=client_uri,
             allowed_scope=ALLOWED_SCOPE,
             allowed_grant=ALLOWED_GRANTS
         )
         if auth_registrar.registered is True:
-            self._registered['auth_client_registered'] = True
+            self._node_data['auth_client_registered'] = True
             return auth_registrar
+        else:
+            self.logger.writeWarning("Unable to successfully register with Authorization Server")
 
     def _register_node(self, node_obj):
         """Attempt to register Node with aggregator
@@ -403,10 +404,8 @@ class Aggregator(object):
         self.logger.writeDebug("Starting HTTP queue processing thread")
         # Checks queue not empty before quitting to make sure unregister node gets done
         while self._running:
-            if (not self._node_data["registered"]
-                    or self._reg_queue.empty()
-                    or self._backoff_active
-                    or not self.aggregator):
+            if (not self._node_data["registered"] or self._reg_queue.empty()
+                    or self._backoff_active or not self.aggregator):
                 gevent.sleep(1)
             else:
                 try:
@@ -486,21 +485,20 @@ class Aggregator(object):
             except IndexError:
                 break
 
-    def register_auth_client(self, node_object):
+    def register_auth_client(self, client_name, client_uri):
         """Function for Registering OAuth client with Auth Server and instantiating OAuth Client class"""
 
         if OAUTH_MODE is True:
-            client_name = node_object['data']['description']
-            client_uri = 'http://' + node_object['data']['label']
             if self.auth_registrar is None:
-                self.auth_registrar = self._auth_register(
+                self.auth_registrar = self._register_auth(
                     client_name=client_name,
                     client_uri=client_uri
                 )
-            if self._registered['auth_client_registered'] and self.auth_client is None:
+            if self._node_data['auth_client_registered'] and self.auth_client is None:
                 try:
                     # Register Node Client
-                    self.auth_registry.register_client(client_name=client_name, client_uri=client_uri)
+                    self.auth_registry.register_client(
+                        client_name=client_name, client_uri=client_uri, **self.auth_registrar.server_metadata)
                 except (OSError, IOError):
                     self.logger.writeError(
                         "Exception accessing OAuth credentials. This may be a file permissions issue.")
@@ -516,7 +514,7 @@ class Aggregator(object):
             try:
                 if "authorization_code" in self.auth_registrar.allowed_grant:
                     # Open browser at endpoint for redirecting to Auth Server's /authorize endpoint
-                    webbrowser.open("http://" + getfqdn() + NODE_APIROOT + "login")
+                    webbrowser.open("http://" + HOSTNAME + NODE_APIROOT + "login")
                 elif "client_credentials" in self.auth_registrar.allowed_grant:
                     # Fetch Token
                     token = self.auth_client.fetch_access_token()
@@ -545,6 +543,9 @@ class Aggregator(object):
             send_obj["data"]["id"] = key
 
         if namespace == "resource" and res_type == "node":
+            # Ensure Registered with Auth Server (is there a better place for this)
+            if OAUTH_MODE is True:
+                self.register_auth_client("nmos-node-{}".format(data["id"]), HOSTNAME)
             # Handle special Node type when Node is not registered, by immediately registering
             if self._node_data["node"] is None:
                 # Will trigger registration in main thread

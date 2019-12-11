@@ -235,7 +235,8 @@ class NodeFacadeService:
         )
         self.registry_cleaner = FacadeRegistryCleaner(self.registry)
         self.registry_cleaner.start()
-        self.httpServer = HttpServer(FacadeAPI, PORT, '0.0.0.0', api_args=[self.registry, self.auth_registry])
+        self.httpServer = HttpServer(
+            FacadeAPI, PORT, '0.0.0.0', api_args=[self.registry, self.auth_registry])
         self.httpServer.start()
         while not self.httpServer.started.is_set():
             self.logger.writeInfo('Waiting for httpserver to start...')

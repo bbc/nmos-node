@@ -22,14 +22,17 @@ from authlib.flask.client import OAuth
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge
 from nmoscommon.logger import Logger
 
-CREDENTIALS_PATH = os.path.join('/var/nmos-node', 'facade.json')  # Change this back after testing
-
+CREDENTIALS_PATH = os.path.join('/var/nmos-node', 'facade.json')
 MDNS_SERVICE_TYPE = "nmos-auth"
 
+# ENDPOINTS
 AUTH_APIROOT = 'x-nmos/auth/v1.0/'
-REGISTRATION_ENDPOINT = urljoin(AUTH_APIROOT, 'register_client')
-AUTHORIZATION_ENDPOINT = urljoin(AUTH_APIROOT, 'authorize')
-TOKEN_ENDPOINT = urljoin(AUTH_APIROOT, 'token')
+SERVER_METADATA_ENDPOINT = '.well-known/oauth-authorization-server/'
+DEFAULT_REGISTRATION_ENDPOINT = urljoin(AUTH_APIROOT, 'register-client')
+DEFAULT_AUTHORIZATION_ENDPOINT = urljoin(AUTH_APIROOT, 'authorize')
+DEFAULT_TOKEN_ENDPOINT = urljoin(AUTH_APIROOT, 'token')
+DEFAULT_REVOCATION_ENDPOINT = urljoin(AUTH_APIROOT, 'revoke')
+DEFAULT_JWKS_ENDPOINT = urljoin(AUTH_APIROOT, 'jwks')
 
 logger = Logger("auth_client", None)
 
@@ -64,8 +67,9 @@ class AuthRegistrar(object):
 
         self.client_id = None
         self.client_secret = None
-        self.bridge = IppmDNSBridge()
-        self._client_registry = {}
+        self.auth_href = IppmDNSBridge().getHref(MDNS_SERVICE_TYPE)
+        self.server_metadata = self._get_server_metadata(self.auth_href)
+
         self.registered = False  # Flag to signify Node is registered with Auth Server
         self.initialised = self.initialise(CREDENTIALS_PATH)
 
@@ -83,10 +87,11 @@ class AuthRegistrar(object):
                     return True
             logger.writeInfo("Registering with Authorization Server...")
             if self.registered is False:
-                reg_resp_json = self.send_oauth_registration_request()
+                self.send_oauth_registration_request()
                 self.registered = True
             logger.writeInfo("Writing OAuth2 credentials to file...")
-            self.write_credentials_to_file(reg_resp_json, credentials_path)
+            # what if registered but fail to write credentials??
+            self.write_credentials_to_file(credentials_path)
             return True
         except Exception as e:
             logger.writeError(
@@ -94,10 +99,8 @@ class AuthRegistrar(object):
             )
             return False
 
-    def write_credentials_to_file(self, data, file_path):
+    def write_credentials_to_file(self, file_path):
         try:
-            self.client_id = data.get('client_id')
-            self.client_secret = data.get('client_secret')
             credentials = {
                 "client_id": self.client_id,
                 "client_secret": self.client_secret
@@ -119,11 +122,35 @@ class AuthRegistrar(object):
             )
             raise
 
+    def _make_default_metadata(self, auth_href):
+        default_metadata = {
+            "authorization_endpoint": urljoin(auth_href, DEFAULT_AUTHORIZATION_ENDPOINT),
+            "token_endpoint": urljoin(auth_href, DEFAULT_TOKEN_ENDPOINT),
+            "registration_endpoint": urljoin(auth_href, DEFAULT_REGISTRATION_ENDPOINT),
+            "jwks_uri": urljoin(auth_href, DEFAULT_JWKS_ENDPOINT),
+            "revocation_endpoint": urljoin(auth_href, DEFAULT_REVOCATION_ENDPOINT),
+            "issuer": auth_href,
+            "token_endpoint_auth_methods_supported": ["client_secret_basic"],
+            "token_endpoint_auth_signing_alg_values_supported": ["RS512"],
+            "response_types_supported": ["code"]
+        }
+        return default_metadata
+
+    def _get_server_metadata(self, auth_href):
+        try:
+            url = urljoin(auth_href, SERVER_METADATA_ENDPOINT)
+            resp = requests.get(url, timeout=0.5, proxies={'http': ''})
+            resp.raise_for_status()  # Raise exception if not a 2XX status code
+            print(resp.json())
+            return resp.json()
+        except Exception as e:
+            logger.writeWarning("Unable to retrieve server metadata - falling back to defaults. {}".format(e))
+            return self._make_default_metadata(auth_href)
+
     def send_oauth_registration_request(self):
         try:
-            href = self.bridge.getHref(MDNS_SERVICE_TYPE)
-            registration_href = urljoin(href, REGISTRATION_ENDPOINT)
-            logger.writeDebug('Registration endpoint href is: {}'.format(registration_href))
+            oauth_registration_href = urljoin(self.auth_href, self.server_metadata['registration_endpoint'])
+            logger.writeDebug('Registration endpoint href is: {}'.format(oauth_registration_href))
 
             data = {
                 "client_name": self.client_name,
@@ -137,14 +164,18 @@ class AuthRegistrar(object):
 
             # Decide how Basic Auth details are retrieved - user input? Retrieved from file?
             reg_resp = requests.post(
-                registration_href,
+                oauth_registration_href,
                 data=data,
                 auth=('dannym', 'password'),
                 timeout=0.5,
                 proxies={'http': ''}
             )
             reg_resp.raise_for_status()  # Raise error if status is an error code
-            self._client_registry[self.client_name] = reg_resp.json()  # Keep a local record of registered clients
+            reg_resp_json = reg_resp.json()
+
+            # Store credentials in member variables in case writing to file fails
+            self.client_id = reg_resp_json.get('client_id')
+            self.client_secret = reg_resp_json.get('client_secret')
             return reg_resp.json()
         except HTTPError as e:
             logger.writeError("Unable to Register Client with Auth Server. {}".format(e))
@@ -156,16 +187,12 @@ class AuthRegistry(OAuth):
     """Subclass of top-level Authlib client.
     Registers Auth Server URIs for requesting access tokens for each registered OAuth2 client.
     Also responsible for storing and fetching bearer token"""
-    def __init__(self):
-        super(AuthRegistry, self).__init__()
-        self.bridge = IppmDNSBridge()
+    def __init__(self, app=None):
+        super(AuthRegistry, self).__init__(app)
+        self.auth_href = IppmDNSBridge().getHref(MDNS_SERVICE_TYPE)
         self.client_name = None
         self.client_uri = None
         self.bearer_token = None
-        self.auth_url = self.bridge.getHref(MDNS_SERVICE_TYPE)
-        self.token_url = urljoin(self.auth_url, TOKEN_ENDPOINT)
-        self.refresh_url = urljoin(self.auth_url, TOKEN_ENDPOINT)
-        self.authorize_url = urljoin(self.auth_url, AUTHORIZATION_ENDPOINT)
         self.client_kwargs = {
             "scope": "is-04",
             'token_endpoint_auth_method': 'client_secret_basic',
@@ -178,17 +205,23 @@ class AuthRegistry(OAuth):
     def update_local_token(self, token):
         self.bearer_token = token
 
-    def register_client(self, client_name, client_uri, credentials_path=CREDENTIALS_PATH):
+    def register_client(self, client_name, client_uri, credentials_path=CREDENTIALS_PATH, **kwargs):
         client_id, client_secret = get_credentials_from_file(credentials_path)
         self.client_name = client_name
         self.client_uri = client_uri
+
+        # Try and retrieve server data
+        token_url = getattr(kwargs, 'token_endpoint', urljoin(self.auth_href, DEFAULT_TOKEN_ENDPOINT))
+        authorize_url = getattr(
+            kwargs, 'authorization_endpoint', urljoin(self.auth_href, DEFAULT_AUTHORIZATION_ENDPOINT))
+
         return self.register(
             name=client_name,
             client_id=client_id,
             client_secret=client_secret,
-            access_token_url=self.token_url,
-            refresh_token_url=self.refresh_url,
-            authorize_url=self.authorize_url,
+            access_token_url=token_url,
+            refresh_token_url=token_url,
+            authorize_url=authorize_url,
             api_base_url=client_uri,
             client_kwargs=self.client_kwargs,
             fetch_token=self.fetch_local_token,
@@ -197,19 +230,30 @@ class AuthRegistry(OAuth):
 
 
 if __name__ == "__main__":  # pragma: no cover
+    from flask import Flask
+    from os import environ
+
+    environ["AUTHLIB_INSECURE_TRANSPORT"] = "1"  # Disable Authlib error about insecure transport
+
+    app = Flask(__name__)
+    auth_registry = AuthRegistry(app)
 
     client_name = "test_oauth_client"
     client_uri = "www.example.com"
 
-    auth_reg = AuthRegistrar(
+    auth_registrar = AuthRegistrar(
         client_name=client_name,
         client_uri=client_uri,
         allowed_scope="is-04",
         redirect_uri="www.app.example.com",
-        allowed_grant="password\nauthorization_code",  # Authlib only accepts grants seperated with newline chars
+        allowed_grant=["password", "authorization_code", "client_credentials"],
         allowed_response="code",
         auth_method="client_secret_basic"
     )
-    if auth_reg.initialised is True:
-        auth_client = AuthRegistry(name=client_name, uri=client_uri)
-        print(auth_client.fetch_token())
+    if auth_registrar.initialised is True:
+        # Register Client
+        auth_registry.register_client(client_name=client_name, client_uri=client_uri, credentials_path=CREDENTIALS_PATH)
+        # Extract the 'RemoteApp' class created when registering
+        auth_client = getattr(auth_registry, client_name)
+        # Fetch Token
+        print(auth_client.fetch_access_token())
