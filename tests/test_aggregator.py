@@ -1377,7 +1377,7 @@ class TestAggregator(unittest.TestCase):
 
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=200, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
+        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "test",
                                         request=request, expected_return=TEST_CONTENT)
 
     def test_send_200_response_ipv6(self):
@@ -1385,7 +1385,7 @@ class TestAggregator(unittest.TestCase):
 
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=200, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
+        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "test",
                                         request=request, expected_return=TEST_CONTENT, prefer_ipv6=True)
 
     def test_send_201_response(self):
@@ -1393,7 +1393,7 @@ class TestAggregator(unittest.TestCase):
 
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=201, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
+        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "test",
                                         request=request, expected_return=TEST_CONTENT)
 
     def test_send_204_response(self):
@@ -1401,7 +1401,7 @@ class TestAggregator(unittest.TestCase):
 
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=204, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
+        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "test",
                                         request=request, expected_return=TEST_CONTENT)
 
     def test_send_409_response(self):
@@ -1409,7 +1409,7 @@ class TestAggregator(unittest.TestCase):
 
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=409, content=TEST_CONTENT)
-        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
+        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "test",
                                         request=request, expected_return=TEST_CONTENT)
 
     def test_send_4xx_response(self):
@@ -1417,28 +1417,28 @@ class TestAggregator(unittest.TestCase):
         apart from 409, which is handled separately"""
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=401)
-        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
+        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "test",
                                         request=request, expected_exception=InvalidRequest)
 
     def test_send_5xx_response(self):
         """On a 5xx response a ServerSideError Exception should be raised"""
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=500)
-        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
+        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "test",
                                         request=request, expected_exception=ServerSideError)
 
     def test_send_no_response(self):
         """On a no response a ServerSideError Exception should be raised"""
         def request(*args, **kwargs):
             return None
-        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
+        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "test",
                                         request=request, expected_exception=ServerSideError)
 
     def test_send_request_exception(self):
         """On a request exception a ServerSideError Exception should be raised"""
         def request(*args, **kwargs):
             raise requests.exceptions.RequestException
-        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
+        self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "test",
                                         request=request, expected_exception=ServerSideError)
 
     # ==================================================================================================================
