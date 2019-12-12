@@ -16,7 +16,7 @@ from __future__ import print_function, absolute_import
 from gevent import monkey
 monkey.patch_all()
 
-import gevent
+import gevent # noqa E402
 import time # noqa E402
 import signal # noqa E402
 import os  # noqa E402
