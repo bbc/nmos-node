@@ -117,30 +117,31 @@ class TestAggregator(unittest.TestCase):
         """register() should register an object into namespace "resource", adding a scheduled call to the registration
         queue to that effect. There is special behaviour when registering a node, since the object can only ever have
         one node registration at a time."""
+
         a = Aggregator()
 
         namespace = "resource"
         objects = [
             ("dummy", "testkey", {"test_param": "test_value", "test_param1": "test_value1"}),
             ("node", "testnode", {"test_param": "test_value", "test_param1": "test_value1"})
-            ]
+        ]
+        with mock.patch.object(nmosnode.aggregator, 'OAUTH_MODE', return_value=True):
+            for o in objects:
+                a.register(o[0], o[1], **o[2])
 
-        for o in objects:
-            a.register(o[0], o[1], **o[2])
+                send_obj = {"type": o[0], "data": {k: v for (k, v) in iteritems(o[2])}}
+                if 'id' not in send_obj['data']:
+                    send_obj['data']['id'] = o[1]
+                if o[0] == "node":
+                    self.assertEqual(a._node_data["node"], send_obj)
+                else:
+                    a._reg_queue.put.assert_called_with({
+                        "method": "POST",
+                        "namespace": namespace,
+                        "res_type": o[0],
+                        "key": o[1]})
 
-            send_obj = {"type": o[0], "data": {k: v for (k, v) in iteritems(o[2])}}
-            if 'id' not in send_obj['data']:
-                send_obj['data']['id'] = o[1]
-            if o[0] == "node":
-                self.assertEqual(a._node_data["node"], send_obj)
-            else:
-                a._reg_queue.put.assert_called_with({
-                    "method": "POST",
-                    "namespace": namespace,
-                    "res_type": o[0],
-                    "key": o[1]})
-
-                self.assertEqual(a._node_data["entities"][namespace][o[0]][o[1]], send_obj)
+                    self.assertEqual(a._node_data["entities"][namespace][o[0]][o[1]], send_obj)
 
     def test_unregister(self):
         """unregister() should schedule a call to unregister the specified devices.
@@ -151,24 +152,24 @@ class TestAggregator(unittest.TestCase):
         objects = [
             ("dummy", "testkey", {"test_param": "test_value", "test_param1": "test_value1"}),
             ("node", "testnode", {"test_param": "test_value", "test_param1": "test_value1"})
-            ]
+        ]
+        with mock.patch.object(nmosnode.aggregator, 'OAUTH_MODE', return_value=True):
+            for o in objects:
+                with mock.patch.object(a, '_unregister_node') as un_register:
+                    a.register(o[0], o[1], **o[2])
 
-        for o in objects:
-            with mock.patch.object(a, '_unregister_node') as un_register:
-                a.register(o[0], o[1], **o[2])
+                    a.unregister(o[0], o[1])
 
-                a.unregister(o[0], o[1])
-
-                if o[0] == "node":
-                    self.assertIsNone(a._node_data["node"])
-                else:
-                    un_register.assert_not_called()
-                    a._reg_queue.put.assert_called_with({
-                        "method": "DELETE",
-                        "namespace": namespace,
-                        "res_type": o[0],
-                        "key": o[1]})
-                    self.assertNotIn(o[1], a._node_data["entities"][namespace][o[0]])
+                    if o[0] == "node":
+                        self.assertIsNone(a._node_data["node"])
+                    else:
+                        un_register.assert_not_called()
+                        a._reg_queue.put.assert_called_with({
+                            "method": "DELETE",
+                            "namespace": namespace,
+                            "res_type": o[0],
+                            "key": o[1]})
+                        self.assertNotIn(o[1], a._node_data["entities"][namespace][o[0]])
 
     def test_stop(self):
         """A call to stop should set _running to false and then join the heartbeat thread."""
@@ -304,7 +305,7 @@ class TestAggregator(unittest.TestCase):
 
                 self.assertTrue(return_val)
                 send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
-                                        "/health/nodes/{}".format(DUMMYNODEID))
+                                        "health/nodes/{}".format(DUMMYNODEID))
                 a._mdns_updater.inc_P2P_enable_count.assert_not_called()
                 self.assertTrue(a._node_data["registered"])
                 self.assertTrue(a._aggregator_list_stale)
@@ -330,7 +331,7 @@ class TestAggregator(unittest.TestCase):
 
                     self.assertTrue(return_val)
                     send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
-                                            "/health/nodes/{}".format(DUMMYNODEID))
+                                            "health/nodes/{}".format(DUMMYNODEID))
                     a._mdns_updater.inc_P2P_enable_count.assert_not_called()
                     un_reg.assert_called_once_with('path/xxx')
                     register.assert_called_once_with(a._node_data["node"])
@@ -354,7 +355,7 @@ class TestAggregator(unittest.TestCase):
 
                 self.assertFalse(return_val)
                 send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
-                                        "/health/nodes/{}".format(DUMMYNODEID))
+                                        "health/nodes/{}".format(DUMMYNODEID))
                 a._mdns_updater.inc_P2P_enable_count.assert_not_called()
                 un_reg.assert_called_once_with('path/xxx')
 
@@ -377,7 +378,7 @@ class TestAggregator(unittest.TestCase):
 
                     self.assertTrue(return_val)
                     send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
-                                            "/health/nodes/{}".format(DUMMYNODEID))
+                                            "health/nodes/{}".format(DUMMYNODEID))
                     a._mdns_updater.inc_P2P_enable_count.assert_not_called()
                     un_reg.assert_called_once_with('path/xxx')
                     register.assert_called_once_with(a._node_data["node"])
@@ -400,7 +401,7 @@ class TestAggregator(unittest.TestCase):
 
                 self.assertFalse(return_val)
                 send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
-                                        "/health/nodes/{}".format(DUMMYNODEID))
+                                        "health/nodes/{}".format(DUMMYNODEID))
                 a._mdns_updater.inc_P2P_enable_count.assert_not_called()
                 un_reg.assert_called_once_with('path/xxx')
 
@@ -419,7 +420,7 @@ class TestAggregator(unittest.TestCase):
 
                 self.assertTrue(return_val)
                 send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
-                                        "/health/nodes/{}".format(DUMMYNODEID))
+                                        "health/nodes/{}".format(DUMMYNODEID))
                 a._mdns_updater.inc_P2P_enable_count.assert_not_called()
                 register.assert_called_once_with(a._node_data["node"])
                 self.assertFalse(a._node_data["registered"])
@@ -439,7 +440,7 @@ class TestAggregator(unittest.TestCase):
 
                 self.assertFalse(return_val)
                 send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
-                                        "/health/nodes/{}".format(DUMMYNODEID))
+                                        "health/nodes/{}".format(DUMMYNODEID))
                 a._mdns_updater.inc_P2P_enable_count.assert_not_called()
                 register.assert_called_once_with(a._node_data["node"])
                 self.assertFalse(a._node_data["registered"])
@@ -458,7 +459,7 @@ class TestAggregator(unittest.TestCase):
 
             self.assertFalse(return_val)
             send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
-                                    "/health/nodes/{}".format(DUMMYNODEID))
+                                    "health/nodes/{}".format(DUMMYNODEID))
             a._mdns_updater.inc_P2P_enable_count.assert_not_called()
             self.assertTrue(a._node_data["registered"])
 
@@ -476,7 +477,7 @@ class TestAggregator(unittest.TestCase):
 
             self.assertFalse(return_val)
             send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
-                                    "/health/nodes/{}".format(DUMMYNODEID))
+                                    "health/nodes/{}".format(DUMMYNODEID))
             a._mdns_updater.inc_P2P_enable_count.assert_not_called()
             self.assertTrue(a._node_data["registered"])
 
@@ -494,7 +495,7 @@ class TestAggregator(unittest.TestCase):
 
             self.assertFalse(return_val)
             send.assert_called_with("POST", "http://example.com", a.aggregator_apiversion,
-                                    "/health/nodes/{}".format(DUMMYNODEID))
+                                    "health/nodes/{}".format(DUMMYNODEID))
             a._mdns_updater.inc_P2P_enable_count.assert_not_called()
             self.assertFalse(a._node_data["registered"])
 
@@ -701,7 +702,7 @@ class TestAggregator(unittest.TestCase):
 
                 self.assertTrue(return_val)
                 send.assert_called_once_with("POST", AGGREGATOR_1, a.aggregator_apiversion,
-                                             "/resource", a._node_data["node"])
+                                             "resource", a._node_data["node"])
                 reg_resources.assert_called_once_with()
                 self.assertFalse(a._backoff_active)
                 self.assertTrue(a._aggregator_list_stale)
@@ -747,7 +748,7 @@ class TestAggregator(unittest.TestCase):
 
                     self.assertTrue(return_val)
                     send.assert_called_with("POST", AGGREGATOR_1, a.aggregator_apiversion,
-                                                "/resource", a._node_data["node"])
+                                            "resource", a._node_data["node"])
                     un_reg.assert_called_once_with('path/xxx')
                     reg_resources.assert_called_once_with()
                     self.assertFalse(a._backoff_active)
@@ -777,7 +778,7 @@ class TestAggregator(unittest.TestCase):
 
                     self.assertTrue(return_val)
                     send.assert_called_with("POST", AGGREGATOR_1, a.aggregator_apiversion,
-                                            "/resource", a._node_data["node"])
+                                            "resource", a._node_data["node"])
                     un_reg.assert_called_once_with('path/xxx')
                     reg_resources.assert_called_once_with()
                     self.assertFalse(a._backoff_active)
@@ -800,7 +801,7 @@ class TestAggregator(unittest.TestCase):
 
             self.assertFalse(return_val)
             send.assert_called_with("POST", AGGREGATOR_1, a.aggregator_apiversion,
-                                        "/resource", a._node_data["node"])
+                                    "resource", a._node_data["node"])
             self.assertFalse(a._backoff_active)
             self.assertFalse(a._node_data['registered'])
             a._mdns_updater.inc_P2P_enable_count.assert_not_called()
@@ -826,7 +827,7 @@ class TestAggregator(unittest.TestCase):
 
                 self.assertFalse(return_val)
                 send.assert_called_with("POST", AGGREGATOR_1, a.aggregator_apiversion,
-                                            "/resource", a._node_data["node"])
+                                        "resource", a._node_data["node"])
                 un_reg.assert_called_once_with('path/xxx')
                 self.assertFalse(a._backoff_active)
                 self.assertFalse(a._node_data['registered'])
@@ -847,9 +848,9 @@ class TestAggregator(unittest.TestCase):
         ]
 
         queue = [
-            {"method": "POST",   "namespace": "resource", "res_type": "dummy", "key": DUMMYNODEID},
+            {"method": "POST", "namespace": "resource", "res_type": "dummy", "key": DUMMYNODEID},
             {"method": "DELETE", "namespace": "resource", "res_type": "dummy", "key": DUMMYNODEID}
-            ]
+        ]
 
         a._reg_queue.empty.side_effect = lambda: (len(queue) == 0)
 
@@ -865,7 +866,7 @@ class TestAggregator(unittest.TestCase):
 
                 self.assertTrue(return_val)
                 send.assert_called_with("POST", AGGREGATOR_1, a.aggregator_apiversion,
-                                            "/resource", a._node_data["node"])
+                                        "resource", a._node_data["node"])
                 reg_resources.assert_called_once_with()
                 self.assertFalse(a._backoff_active)
                 self.assertTrue(a._node_data['registered'])
@@ -894,7 +895,7 @@ class TestAggregator(unittest.TestCase):
 
             self.assertTrue(return_val)
             send.assert_called_once_with("DELETE", AGGREGATOR_1, a.aggregator_apiversion,
-                                         "/resource/nodes/{}".format(DUMMYNODEID))
+                                         "resource/nodes/{}".format(DUMMYNODEID))
             self.assertFalse(a._node_data['registered'])
 
         # Relative URL
@@ -933,7 +934,7 @@ class TestAggregator(unittest.TestCase):
 
             self.assertFalse(return_val)
             send.assert_called_once_with("DELETE", AGGREGATOR_1, a.aggregator_apiversion,
-                                         "/resource/nodes/{}".format(DUMMYNODEID))
+                                         "resource/nodes/{}".format(DUMMYNODEID))
             self.assertFalse(a._node_data['registered'])
 
     def test_unregister_node_Exception(self):
@@ -951,7 +952,7 @@ class TestAggregator(unittest.TestCase):
 
             self.assertFalse(return_val)
             send.assert_called_once_with("DELETE", AGGREGATOR_1, a.aggregator_apiversion,
-                                         "/resource/nodes/{}".format(DUMMYNODEID))
+                                         "resource/nodes/{}".format(DUMMYNODEID))
             self.assertFalse(a._node_data['registered'])
 
     # # ================================================================================================================
@@ -982,24 +983,23 @@ class TestAggregator(unittest.TestCase):
             a._node_data["entities"]["resource"]["device"] = {}
         if "flow" not in a._node_data["entities"]["resource"]:
             a._node_data["entities"]["resource"]["flow"] = {}
-        a._node_data["entities"]["resource"]["dummy"][DUMMYKEY]     = {DUMMYPARAMKEY: DUMMYPARAMVAL}
+        a._node_data["entities"]["resource"]["dummy"][DUMMYKEY] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
         a._node_data["entities"]["resource"]["device"][DUMMYDEVICE] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
-        a._node_data["entities"]["resource"]["flow"][DUMMYFLOW]     = {DUMMYPARAMKEY: DUMMYPARAMVAL}
+        a._node_data["entities"]["resource"]["flow"][DUMMYFLOW] = {DUMMYPARAMKEY: DUMMYPARAMVAL}
 
         expected_put_calls = []
         # The re-registration of the other resources should be queued for the next run loop, and arranged in order
         expected_put_calls = (
             sum([
-                [mock.call({"method": "POST",   "namespace": "resource", "res_type": res_type, "key": key})
-                    for key in a._node_data["entities"]["resource"][res_type]]
-                        for res_type in a.registration_order if res_type in a._node_data["entities"]["resource"]
-                ], []) +
-            sum([
-                [mock.call({"method": "POST",   "namespace": "resource", "res_type": res_type, "key": key})
-                    for key in a._node_data["entities"]["resource"][res_type]]
-                        for res_type in a._node_data["entities"]["resource"] if res_type not in a.registration_order
-                ], [])
-            )
+                [mock.call({"method": "POST", "namespace": "resource", "res_type": res_type, "key": key})
+                    for key in a._node_data["entities"]["resource"][res_type]
+                 ] for res_type in a.registration_order if res_type in a._node_data["entities"]["resource"]
+            ], []) + sum([
+                [mock.call({"method": "POST", "namespace": "resource", "res_type": res_type, "key": key})
+                    for key in a._node_data["entities"]["resource"][res_type]
+                 ] for res_type in a._node_data["entities"]["resource"] if res_type not in a.registration_order
+            ], [])
+        )
 
         a._register_node_resources()
         self.assertListEqual(a._reg_queue.put.mock_calls, expected_put_calls)
@@ -1068,18 +1068,18 @@ class TestAggregator(unittest.TestCase):
             {"method": "POST", "namespace": "resource", "res_type": "node", "key": DUMMYNODEID},
             {"method": "POST", "namespace": "resource", "res_type": "dummy", "key": DUMMYKEY},
             {"method": "DELETE", "namespace": "resource", "res_type": "dummy", "key": DUMMYKEY}
-            ]
+        ]
 
         a._reg_queue.empty.side_effect = lambda: (len(queue) == 0)
         a._reg_queue.get.side_effect = lambda: queue.pop(0)
 
         expected_calls = [
-            mock.call('POST', "www.example.com", "v1.2", '/resource',
+            mock.call('POST', "www.example.com", "v1.2", 'resource',
                       a._node_data["node"]),
-            mock.call('POST', "www.example.com", "v1.2", '/resource',
+            mock.call('POST', "www.example.com", "v1.2", 'resource',
                       a._node_data["entities"]["resource"]["dummy"][DUMMYKEY]),
-            mock.call('DELETE', "www.example.com", "v1.2", '/resource/dummys/' + DUMMYKEY)
-            ]
+            mock.call('DELETE', "www.example.com", "v1.2", 'resource/dummys/' + DUMMYKEY)
+        ]
 
         def killloop(*args, **kwargs):
             a._running = False
@@ -1111,7 +1111,7 @@ class TestAggregator(unittest.TestCase):
 
         queue = [
             {"method": "POST", "namespace": "resource", "res_type": "node", "key": DUMMYNODEID},
-            ]
+        ]
 
         a._reg_queue.empty.side_effect = lambda: (len(queue) == 0)
         a._reg_queue.get.side_effect = lambda: queue.pop(0)
@@ -1148,15 +1148,15 @@ class TestAggregator(unittest.TestCase):
 
         queue = [
             {"method": "POST", "namespace": "resource", "res_type": "dummy", "key": DUMMYKEY},
-            ]
+        ]
 
         a._reg_queue.empty.side_effect = lambda: (len(queue) == 0)
         a._reg_queue.get.side_effect = lambda: queue.pop(0)
 
         expected_calls = [
-            mock.call('POST', "www.example.com", "v1.2", '/resource',
+            mock.call('POST', "www.example.com", "v1.2", 'resource',
                       a._node_data["entities"]["resource"]["dummy"][DUMMYKEY]),
-            ]
+        ]
 
         def killloop(*args, **kwargs):
             a._running = False
@@ -1190,13 +1190,13 @@ class TestAggregator(unittest.TestCase):
 
         queue = [
             {"method": "DELETE", "namespace": "resource", "res_type": "dummy", "key": DUMMYKEY}
-            ]
+        ]
 
         a._reg_queue.empty.side_effect = lambda: (len(queue) == 0)
         a._reg_queue.get.side_effect = lambda: queue.pop(0)
 
         expected_calls = [
-            mock.call('DELETE', "www.example.com", "v1.2", '/resource/dummys/' + DUMMYKEY)
+            mock.call('DELETE', "www.example.com", "v1.2", 'resource/dummys/' + DUMMYKEY)
         ]
 
         def killloop(*args, **kwargs):
@@ -1241,7 +1241,7 @@ class TestAggregator(unittest.TestCase):
         a._reg_queue.put.side_effect = lambda data: updated_queue.append(data)
 
         expected_calls = [
-            mock.call('POST', "www.example.com", "v1.2", '/resource',
+            mock.call('POST', "www.example.com", "v1.2", 'resource',
                       a._node_data["entities"]["resource"]["dummy"][DUMMYKEY]),
         ]
 
@@ -1278,7 +1278,7 @@ class TestAggregator(unittest.TestCase):
 
         queue = [
             {"method": "DANCE", "namespace": "resource", "res_type": "dummy", "key": DUMMYKEY}
-            ]
+        ]
 
         a._reg_queue.empty.side_effect = lambda: (len(queue) == 0)
         a._reg_queue.get.side_effect = lambda: queue.pop(0)
@@ -1331,8 +1331,8 @@ class TestAggregator(unittest.TestCase):
         def create_mock_request(method, aggregator_url, api_ver, url, expected_data, prefer_ipv6=False):
             if not prefer_ipv6:
                 return (mock.call(
-                    method,
-                    urljoin(
+                    method=method,
+                    url=urljoin(
                         aggregator_url,
                         AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + a.aggregator_apiversion + url
                     ),
@@ -1340,8 +1340,8 @@ class TestAggregator(unittest.TestCase):
                     timeout=1.0))
             else:
                 return (mock.call(
-                    method,
-                    urljoin(
+                    method=method,
+                    url=urljoin(
                         aggregator_url,
                         AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + a.aggregator_apiversion + url
                     ),
@@ -1374,6 +1374,7 @@ class TestAggregator(unittest.TestCase):
 
     def test_send_200_response(self):
         TEST_CONTENT = "kasjhdlkhnjgsn"
+
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=200, content=TEST_CONTENT)
         self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
@@ -1381,6 +1382,7 @@ class TestAggregator(unittest.TestCase):
 
     def test_send_200_response_ipv6(self):
         TEST_CONTENT = "kasjhdlkhnjgsn"
+
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=200, content=TEST_CONTENT)
         self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
@@ -1388,6 +1390,7 @@ class TestAggregator(unittest.TestCase):
 
     def test_send_201_response(self):
         TEST_CONTENT = "kasjhdlkhnjgsn"
+
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=201, content=TEST_CONTENT)
         self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
@@ -1395,6 +1398,7 @@ class TestAggregator(unittest.TestCase):
 
     def test_send_204_response(self):
         TEST_CONTENT = "kasjhdlkhnjgsn"
+
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=204, content=TEST_CONTENT)
         self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
@@ -1402,6 +1406,7 @@ class TestAggregator(unittest.TestCase):
 
     def test_send_409_response(self):
         TEST_CONTENT = "kasjhdlkhnjgsn"
+
         def request(*args, **kwargs):
             return mock.MagicMock(status_code=409, content=TEST_CONTENT)
         self.assert_send_runs_correctly("POST", "http://www.example.com:80", "v1.2", "/test",
@@ -1460,11 +1465,11 @@ class TestAggregator(unittest.TestCase):
         ]
 
         expected_request_calls = [
-            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+            mock.call(method='POST', url=self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
                       "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
-            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion, "resource"),
+            mock.call(method='POST', url=self.construct_url(AGGREGATOR_1, a.aggregator_apiversion, "resource"),
                       json={"data": {"id": DUMMYNODEID}, "type": "node"}, timeout=1.0),
-            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+            mock.call(method='POST', url=self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
                       "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
         ]
 
@@ -1498,13 +1503,13 @@ class TestAggregator(unittest.TestCase):
         ]
 
         expected_request_calls = [
-            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+            mock.call(method='POST', url=self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
                       "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
-            mock.call('DELETE', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+            mock.call(method='DELETE', url=self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
                       "resource/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
-            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion, "resource"),
+            mock.call(method='POST', url=self.construct_url(AGGREGATOR_1, a.aggregator_apiversion, "resource"),
                       json={"data": {"id": DUMMYNODEID}, "type": "node"}, timeout=1.0),
-            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+            mock.call(method='POST', url=self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
                       "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
         ]
 
@@ -1539,13 +1544,13 @@ class TestAggregator(unittest.TestCase):
         ]
 
         expected_request_calls = [
-            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+            mock.call(method='POST', url=self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
                       "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
-            mock.call('POST', self.construct_url(AGGREGATOR_2, a.aggregator_apiversion,
+            mock.call(method='POST', url=self.construct_url(AGGREGATOR_2, a.aggregator_apiversion,
                       "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
-            mock.call('POST', self.construct_url(AGGREGATOR_2, a.aggregator_apiversion, "resource"),
+            mock.call(method='POST', url=self.construct_url(AGGREGATOR_2, a.aggregator_apiversion, "resource"),
                       json={"data": {"id": DUMMYNODEID}, "type": "node"}, timeout=1.0),
-            mock.call('POST', self.construct_url(AGGREGATOR_2, a.aggregator_apiversion,
+            mock.call(method='POST', url=self.construct_url(AGGREGATOR_2, a.aggregator_apiversion,
                       "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
         ]
 
@@ -1580,15 +1585,15 @@ class TestAggregator(unittest.TestCase):
         ]
 
         expected_request_calls = [
-            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+            mock.call(method='POST', url=self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
                       "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
-            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion, "resource"),
+            mock.call(method='POST', url=self.construct_url(AGGREGATOR_1, a.aggregator_apiversion, "resource"),
                       json={"data": {"id": DUMMYNODEID}, "type": "node"}, timeout=1.0),
-            mock.call('DELETE', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+            mock.call(method='DELETE', url=self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
                       "resource/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
-            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion, "resource"),
+            mock.call(method='POST', url=self.construct_url(AGGREGATOR_1, a.aggregator_apiversion, "resource"),
                       json={"data": {"id": DUMMYNODEID}, "type": "node"}, timeout=1.0),
-            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+            mock.call(method='POST', url=self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
                       "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
         ]
 
@@ -1624,15 +1629,15 @@ class TestAggregator(unittest.TestCase):
         ]
 
         expected_request_calls = [
-            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
+            mock.call(method='POST', url=self.construct_url(AGGREGATOR_1, a.aggregator_apiversion,
                       "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
-            mock.call('POST', self.construct_url(AGGREGATOR_1, a.aggregator_apiversion, "resource"),
+            mock.call(method='POST', url=self.construct_url(AGGREGATOR_1, a.aggregator_apiversion, "resource"),
                       json={"data": {"id": DUMMYNODEID}, "type": "node"}, timeout=1.0),
-            mock.call('POST', self.construct_url(AGGREGATOR_2, a.aggregator_apiversion,
+            mock.call(method='POST', url=self.construct_url(AGGREGATOR_2, a.aggregator_apiversion,
                       "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
-            mock.call('POST', self.construct_url(AGGREGATOR_2, a.aggregator_apiversion, "resource"),
+            mock.call(method='POST', url=self.construct_url(AGGREGATOR_2, a.aggregator_apiversion, "resource"),
                       json={"data": {"id": DUMMYNODEID}, "type": "node"}, timeout=1.0),
-            mock.call('POST', self.construct_url(AGGREGATOR_2, a.aggregator_apiversion,
+            mock.call(method='POST', url=self.construct_url(AGGREGATOR_2, a.aggregator_apiversion,
                       "health/nodes/{}".format(DUMMYNODEID)), json=None, timeout=1.0),
         ]
 
