@@ -1334,7 +1334,7 @@ class TestAggregator(unittest.TestCase):
                     method=method,
                     url=urljoin(
                         aggregator_url,
-                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + a.aggregator_apiversion + url
+                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + a.aggregator_apiversion + '/' + url
                     ),
                     json=expected_data,
                     timeout=1.0))
@@ -1343,7 +1343,7 @@ class TestAggregator(unittest.TestCase):
                     method=method,
                     url=urljoin(
                         aggregator_url,
-                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + a.aggregator_apiversion + url
+                        AGGREGATOR_APINAMESPACE + "/" + AGGREGATOR_APINAME + "/" + a.aggregator_apiversion + '/' + url
                     ),
                     json=expected_data,
                     timeout=1.0,
