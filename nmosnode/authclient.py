@@ -141,7 +141,6 @@ class AuthRegistrar(object):
             url = urljoin(auth_href, SERVER_METADATA_ENDPOINT)
             resp = requests.get(url, timeout=0.5, proxies={'http': ''})
             resp.raise_for_status()  # Raise exception if not a 2XX status code
-            print(resp.json())
             return resp.json()
         except Exception as e:
             logger.writeWarning("Unable to retrieve server metadata - falling back to defaults. {}".format(e))
@@ -166,7 +165,6 @@ class AuthRegistrar(object):
             reg_resp = requests.post(
                 oauth_registration_href,
                 data=data,
-                auth=('dannym', 'password'),
                 timeout=0.5,
                 proxies={'http': ''}
             )

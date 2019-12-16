@@ -26,7 +26,7 @@ import socket # noqa E402
 
 from six import itervalues # noqa E402
 from socket import gethostname, getfqdn # noqa E402
-from os import getpid # noqa E402
+from os import getpid, environ # noqa E402
 from subprocess import check_output # noqa E402
 # Handle if systemd is installed instead of newer cysystemd
 try:
@@ -61,6 +61,9 @@ FQDN = getfqdn()
 HTTPS_MODE = _config.get('https_mode', 'disabled')
 ENABLE_P2P = _config.get('node_p2p_enable', True)
 OAUTH_MODE = _config.get('oauth_mode', False)
+
+# BYPASS AUTHLIB SECURITY CHECK DUE TO REVERSE PROXY
+environ["AUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 
 def updateHost():

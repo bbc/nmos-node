@@ -499,6 +499,7 @@ class Aggregator(object):
                     # Register Node Client
                     self.auth_registry.register_client(
                         client_name=client_name, client_uri=client_uri, **self.auth_registrar.server_metadata)
+                    self.logger.writeInfo("Successfully registered Auth Client")
                 except (OSError, IOError):
                     self.logger.writeError(
                         "Exception accessing OAuth credentials. This may be a file permissions issue.")
@@ -513,8 +514,8 @@ class Aggregator(object):
         if self.auth_client is not None and self.auth_registrar is not None:
             try:
                 if "authorization_code" in self.auth_registrar.allowed_grant:
-                    # Open browser at endpoint for redirecting to Auth Server's /authorize endpoint
-                    webbrowser.open("http://" + HOSTNAME + NODE_APIROOT + "login")
+                    # Endpoint '/login' on Node will provide redirect to authorization endpoint on Auth Server
+                    return
                 elif "client_credentials" in self.auth_registrar.allowed_grant:
                     # Fetch Token
                     token = self.auth_client.fetch_access_token()

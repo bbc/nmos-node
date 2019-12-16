@@ -61,7 +61,7 @@ class FacadeAPI(WebAPI):
     def nameroot(self):
         return [api_version + "/" for api_version in NODE_APIVERSIONS]
 
-    @route(NODE_APIROOT + "login", auto_json=False)
+    @route(NODE_APIROOT + "login/", auto_json=False)
     def login(self):
         """Redirect to Auth Server's authorization endpoint"""
         redirect_uri = url_for('_authorization', _external=True)
@@ -71,6 +71,7 @@ class FacadeAPI(WebAPI):
     @route(NODE_APIROOT + "authorize", auto_json=False)
     def authorization(self):
         """Authorize Auth Server redirect to obtain token then store in memory"""
+        self.auth_client = getattr(self.auth_registry, self.auth_registry.client_name)
         token = self.auth_client.authorize_access_token()
         self.auth_registry.bearer_token = token
         return redirect(url_for('_nameroot'))
