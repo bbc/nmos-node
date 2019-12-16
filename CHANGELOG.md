@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.12.0
+- Add OAuth 2.0 client registration and token request functionality
+
 ## 0.11.0
 - Add exponential backoff when registration APIs return HTTP 500 responses
 - Add support for un-registering when requests return HTTP 409 responses
