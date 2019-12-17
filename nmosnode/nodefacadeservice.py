@@ -108,7 +108,6 @@ class NodeFacadeService:
         }
         self.mdns_updater = None
         self.auth_registry = AuthRegistry()
-        self.aggregator = Aggregator(self.logger, self.mdns_updater, self.auth_registry)
 
         if ENABLE_P2P:
             if HTTPS_MODE == "enabled":
@@ -121,6 +120,8 @@ class NodeFacadeService:
                 self.mdns, DNS_SD_TYPE, DNS_SD_NAME, self.mappings, self.dns_sd_port, self.logger,
                 txt_recs=self._mdns_txt(NODE_APIVERSIONS, self.protocol, OAUTH_MODE)
             )
+
+        self.aggregator = Aggregator(self.logger, self.mdns_updater, self.auth_registry)
 
     def _mdns_txt(self, versions, protocol, oauth_mode):
         return {

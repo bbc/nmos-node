@@ -92,10 +92,6 @@ class Aggregator(object):
                 }
             }
         }
-        self._reg_queue = gevent.queue.Queue()
-        self.main_thread = gevent.spawn(self._main_thread)
-        self.queue_thread = gevent.spawn(self._process_queue)
-
         self._running = True
         self._aggregator_list_stale = True
         self._aggregator_failure = False  # Variable to flag when aggregator has returned and unexpected error
@@ -105,6 +101,10 @@ class Aggregator(object):
         self.auth_registrar = None  # Class responsible for registering with Auth Server
         self.auth_registry = auth_registry  # Top level class that tracks locally registered OAuth clients
         self.auth_client = None  # Instance of Oauth client responsible for performing token requests
+
+        self._reg_queue = gevent.queue.Queue()
+        self.main_thread = gevent.spawn(self._main_thread)
+        self.queue_thread = gevent.spawn(self._process_queue)
 
     def _set_api_version_and_srv_type(self, api_ver):
         """Set the aggregator api version equal to parameter and DNS-SD service type based on api version"""
