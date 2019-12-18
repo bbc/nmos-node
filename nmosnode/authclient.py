@@ -18,6 +18,7 @@ import requests
 from requests.exceptions import HTTPError
 from six.moves.urllib.parse import urljoin
 from authlib.flask.client import OAuth
+from gevent import sleep
 
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge
 from nmoscommon.logger import Logger
@@ -35,6 +36,7 @@ DEFAULT_REVOCATION_ENDPOINT = urljoin(AUTH_APIROOT, 'revoke')
 DEFAULT_JWKS_ENDPOINT = urljoin(AUTH_APIROOT, 'jwks')
 
 logger = Logger("auth_client", None)
+mdnsbridge = IppmDNSBridge(logger=logger)
 
 
 def get_credentials_from_file(filename):
@@ -45,11 +47,30 @@ def get_credentials_from_file(filename):
         client_secret = credentials['client_secret']
         return client_id, client_secret
     except (OSError, IOError) as e:
-        logger.writeError("Could not read OAuth2 client credentials from file: {}. Error: {}".format(filename, e))
+        logger.writeError("Could not read OAuth2 client credentials from file: {}. {}".format(filename, e))
         raise
     except KeyError as e:
-        logger.writeError("OAuth2 credentials not found in file: {}. Error: {}".format(filename, e))
+        logger.writeError("OAuth2 credentials not found in file: {}. {}".format(filename, e))
         raise
+
+
+def get_dns_service(service_type):
+    wait_time = 2
+    retry_count = 3
+    while retry_count > 0:
+        auth_href = mdnsbridge.getHref(service_type)
+        if auth_href == "":
+            logger.writeWarning(
+                "Could not locate {} service type, sleeping for {} seconds".format(MDNS_SERVICE_TYPE, wait_time))
+            retry_count -= 1
+            sleep(wait_time)
+        else:
+            return auth_href
+    logger.writeError("Cannot locate service type {} after {} attempts.".format(MDNS_SERVICE_TYPE, retry_count))
+
+
+# Globally define auth_href so it can be shared between both classes
+auth_href = None
 
 
 class AuthRegistrar(object):
@@ -67,9 +88,7 @@ class AuthRegistrar(object):
 
         self.client_id = None
         self.client_secret = None
-        self.auth_href = IppmDNSBridge().getHref(MDNS_SERVICE_TYPE)
-        self.server_metadata = self._get_server_metadata(self.auth_href)
-
+        self.server_metadata = None
         self.registered = False  # Flag to signify Node is registered with Auth Server
         self.initialised = self.initialise(CREDENTIALS_PATH)
 
@@ -77,6 +96,9 @@ class AuthRegistrar(object):
         """Check if credentials file already exists, meaning the device is already registered.
         If not, register with Auth Server and write client credentials to file."""
         try:
+            global auth_href
+            auth_href = get_dns_service(MDNS_SERVICE_TYPE)
+            self._get_server_metadata(auth_href)
             if os.path.isfile(credentials_path):
                 with open(credentials_path, 'r') as f:
                     data = json.load(f)
@@ -122,6 +144,29 @@ class AuthRegistrar(object):
             )
             raise
 
+    def remove_credentials_from_file(self, file_path):
+        try:
+            # Load contents if file exists
+            if os.path.exists(file_path):
+                with open(file_path) as f:
+                    data = json.load(f)
+                data.pop("client_id", None)
+                data.pop("client_secret", None)
+                # Write remaining data back to file
+                with open(file_path, 'w') as f:
+                    json.dump(data, f)
+                return True
+            else:
+                logger.writeError(
+                    "Client credentials file '{}' does not exist".format(file_path)
+                )
+                return False
+        except (OSError, IOError) as e:
+            logger.writeError(
+                "Could not remove OAuth client credentials from file {}. {}".format(file_path, e)
+            )
+            raise
+
     def _make_default_metadata(self, auth_href):
         default_metadata = {
             "authorization_endpoint": urljoin(auth_href, DEFAULT_AUTHORIZATION_ENDPOINT),
@@ -141,14 +186,16 @@ class AuthRegistrar(object):
             url = urljoin(auth_href, SERVER_METADATA_ENDPOINT)
             resp = requests.get(url, timeout=0.5, proxies={'http': ''})
             resp.raise_for_status()  # Raise exception if not a 2XX status code
-            return resp.json()
+            metadata = resp.json()
         except Exception as e:
             logger.writeWarning("Unable to retrieve server metadata - falling back to defaults. {}".format(e))
-            return self._make_default_metadata(auth_href)
+            metadata = self._make_default_metadata(auth_href)
+        finally:
+            self.server_metadata = metadata
 
     def send_oauth_registration_request(self):
         try:
-            oauth_registration_href = urljoin(self.auth_href, self.server_metadata['registration_endpoint'])
+            oauth_registration_href = self.server_metadata['registration_endpoint']
             logger.writeDebug('Registration endpoint href is: {}'.format(oauth_registration_href))
 
             data = {
@@ -187,7 +234,6 @@ class AuthRegistry(OAuth):
     Also responsible for storing and fetching bearer token"""
     def __init__(self, app=None):
         super(AuthRegistry, self).__init__(app)
-        self.auth_href = IppmDNSBridge().getHref(MDNS_SERVICE_TYPE)
         self.client_name = None
         self.client_uri = None
         self.bearer_token = None
@@ -208,10 +254,11 @@ class AuthRegistry(OAuth):
         self.client_name = client_name
         self.client_uri = client_uri
 
-        # Try and retrieve server data
-        token_url = getattr(kwargs, 'token_endpoint', urljoin(self.auth_href, DEFAULT_TOKEN_ENDPOINT))
+        # Retrieve server metadata from kwargs, falling back to defaults if not found
+        global auth_href
+        token_url = getattr(kwargs, 'token_endpoint', urljoin(auth_href, DEFAULT_TOKEN_ENDPOINT))
         authorize_url = getattr(
-            kwargs, 'authorization_endpoint', urljoin(self.auth_href, DEFAULT_AUTHORIZATION_ENDPOINT))
+            kwargs, 'authorization_endpoint', urljoin(auth_href, DEFAULT_AUTHORIZATION_ENDPOINT))
 
         return self.register(
             name=client_name,

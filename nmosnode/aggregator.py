@@ -522,7 +522,7 @@ class Aggregator(object):
                     # Store token in member variable to be extracted using `fetch_local_token` function
                     self.auth_registry.bearer_token = token
                 else:
-                    raise OAuth2Error("Client registered with unsupported Grant Type")
+                    raise OAuth2Error("Client not registered with supported Grant Type")
             except OAuth2Error as e:
                 self.logger.writeError("Failure fetching access token. {}".format(e))
 
@@ -662,7 +662,8 @@ class Aggregator(object):
                 # General OAuth Error (e.g. incorrect request details, invalid client, etc.)
                 except OAuth2Error as e:
                     self.logger.writeError(
-                        "Failed to fetch token before making API call to {}. Error: {}".format(url, e))
+                        "Failed to fetch token before making API call to {}. {}".format(url, e))
+                    self.auth_registrar = None
 
 
 class MDNSUpdater(object):
