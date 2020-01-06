@@ -17,7 +17,7 @@ import json
 import requests
 from requests.exceptions import HTTPError
 from six.moves.urllib.parse import urljoin
-from authlib.flask.client import OAuth
+from authlib.integrations.flask_client import OAuth
 from gevent import sleep
 
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge
@@ -57,12 +57,11 @@ def get_credentials_from_file(filename):
 def get_dns_service(service_type):
     wait_time = 2
     retry_count = 3
-    while retry_count > 0:
+    for count in range(retry_count):
         auth_href = mdnsbridge.getHref(service_type)
         if auth_href == "":
             logger.writeWarning(
                 "Could not locate {} service type, sleeping for {} seconds".format(MDNS_SERVICE_TYPE, wait_time))
-            retry_count -= 1
             sleep(wait_time)
         else:
             return auth_href
@@ -88,7 +87,8 @@ class AuthRegistrar(object):
 
         self.client_id = None
         self.client_secret = None
-        self.server_metadata = None
+        self.server_metadata = {}  # RFC 8414
+        self.client_metadata = {}  # The returned data from client registration
         self.registered = False  # Flag to signify Node is registered with Auth Server
         self.initialised = self.initialise(CREDENTIALS_PATH)
 
@@ -98,6 +98,8 @@ class AuthRegistrar(object):
         try:
             global auth_href
             auth_href = get_dns_service(MDNS_SERVICE_TYPE)
+            if not auth_href:
+                return False
             self._get_server_metadata(auth_href)
             if os.path.isfile(credentials_path):
                 with open(credentials_path, 'r') as f:
@@ -109,7 +111,7 @@ class AuthRegistrar(object):
                     return True
             logger.writeInfo("Registering with Authorization Server...")
             if self.registered is False:
-                self.send_oauth_registration_request()
+                self.client_metadata = self.send_oauth_registration_request()
                 self.registered = True
             logger.writeInfo("Writing OAuth2 credentials to file...")
             # what if registered but fail to write credentials??
@@ -195,16 +197,16 @@ class AuthRegistrar(object):
 
     def send_oauth_registration_request(self):
         try:
-            oauth_registration_href = self.server_metadata['registration_endpoint']
+            oauth_registration_href = self.server_metadata.get('registration_endpoint')
             logger.writeDebug('Registration endpoint href is: {}'.format(oauth_registration_href))
 
             data = {
                 "client_name": self.client_name,
                 "client_uri": self.client_uri,
                 "scope": self.allowed_scope,
-                "redirect_uri": self.redirect_uri,
-                "grant_type": self.allowed_grant,
-                "response_type": self.allowed_response,
+                "redirect_uris": self.redirect_uri,
+                "grant_types": self.allowed_grant,
+                "response_types": self.allowed_response,
                 "token_endpoint_auth_method": self.auth_method
             }
 

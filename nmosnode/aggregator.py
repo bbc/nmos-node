@@ -513,10 +513,11 @@ class Aggregator(object):
         """Fetch Access Token either using redirection grant flow or using auth_client"""
         if self.auth_client is not None and self.auth_registrar is not None:
             try:
-                if "authorization_code" in self.auth_registrar.allowed_grant:
-                    # Endpoint '/login' on Node will provide redirect to authorization endpoint on Auth Server
+                if "authorization_code" in self.auth_registrar.client_metadata.get("grant_types", {}):
+                    self.logger.writeInfo(
+                        "Endpoint '/login' on Node API will provide redirect to authorization endpoint on Auth Server.")
                     return
-                elif "client_credentials" in self.auth_registrar.allowed_grant:
+                elif "client_credentials" in self.auth_registrar.client_metadata.get("grant_types", {}):
                     # Fetch Token
                     token = self.auth_client.fetch_access_token()
                     # Store token in member variable to be extracted using `fetch_local_token` function
@@ -657,7 +658,7 @@ class Aggregator(object):
                     try:
                         return self.auth_client.request(**kwargs)  # Resend the request
                     except Exception as e:
-                        self.logger.writeError("Error re-requesting token: {}. Removing Auth Client".format(e))
+                        self.logger.writeError("Error re-requesting token: {}.".format(e))
                         self.auth_client = None
                 # General OAuth Error (e.g. incorrect request details, invalid client, etc.)
                 except OAuth2Error as e:
