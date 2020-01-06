@@ -65,8 +65,11 @@ class FacadeAPI(WebAPI):
     def oauth(self):
         """Redirect to Auth Server's authorization endpoint"""
         redirect_uri = url_for('_authorization', _external=True)
-        self.auth_client = getattr(self.auth_registry, self.auth_registry.client_name)
-        return self.auth_client.authorize_redirect(redirect_uri)
+        if self.auth_registry.client_name:
+            self.auth_client = getattr(self.auth_registry, self.auth_registry.client_name)
+            return self.auth_client.authorize_redirect(redirect_uri)
+        else:
+            abort(400, "Client not registered with Auth Server")
 
     @route(NODE_APIROOT + "authorize", auto_json=False)
     def authorization(self):

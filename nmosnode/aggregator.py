@@ -86,7 +86,6 @@ class Aggregator(object):
         self._node_data = {
             'node': None,
             'registered': False,
-            'auth_client_registered': False,
             'entities': {
                 'resource': {
                 }
@@ -234,7 +233,6 @@ class Aggregator(object):
             allowed_grant=ALLOWED_GRANTS
         )
         if auth_registrar.registered is True:
-            self._node_data['auth_client_registered'] = True
             return auth_registrar
         else:
             self.logger.writeWarning("Unable to successfully register with Authorization Server")
@@ -494,7 +492,7 @@ class Aggregator(object):
                     client_name=client_name,
                     client_uri=client_uri
                 )
-            if self._node_data['auth_client_registered'] and self.auth_client is None:
+            if self.auth_registrar and self.auth_client is None:
                 try:
                     # Register Node Client
                     self.auth_registry.register_client(
@@ -651,20 +649,11 @@ class Aggregator(object):
             with self.auth_registry.app.app_context():
                 try:
                     return self.auth_client.request(**kwargs)
-                # Request may fail if access token (client credentials) or refresh token (auth code) has expired
-                except InvalidTokenError:
-                    self.logger.writeWarning("Invalid Token. Requesting new Token.")
-                    self.get_auth_token()
-                    try:
-                        return self.auth_client.request(**kwargs)  # Resend the request
-                    except Exception as e:
-                        self.logger.writeError("Error re-requesting token: {}.".format(e))
-                        self.auth_client = None
                 # General OAuth Error (e.g. incorrect request details, invalid client, etc.)
                 except OAuth2Error as e:
                     self.logger.writeError(
                         "Failed to fetch token before making API call to {}. {}".format(url, e))
-                    self.auth_registrar = None
+                    self.auth_registrar = self.auth_client = None
 
 
 class MDNSUpdater(object):
