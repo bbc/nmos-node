@@ -109,13 +109,13 @@ class NodeFacadeService:
         self.mdns_updater = None
         self.auth_registry = AuthRegistry()
 
+        if HTTPS_MODE == "enabled":
+            self.dns_sd_port = DNS_SD_HTTPS_PORT
+            self.protocol = "https"
+        else:
+            self.dns_sd_port = DNS_SD_HTTP_PORT
+            self.protocol = "http"
         if ENABLE_P2P:
-            if HTTPS_MODE == "enabled":
-                self.dns_sd_port = DNS_SD_HTTPS_PORT
-                self.protocol = "https"
-            else:
-                self.dns_sd_port = DNS_SD_HTTP_PORT
-                self.protocol = "http"
             self.mdns_updater = MDNSUpdater(
                 self.mdns, DNS_SD_TYPE, DNS_SD_NAME, self.mappings, self.dns_sd_port, self.logger,
                 txt_recs=self._mdns_txt(NODE_APIVERSIONS, self.protocol, OAUTH_MODE)
