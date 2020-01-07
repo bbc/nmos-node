@@ -14,19 +14,23 @@
 
 from __future__ import print_function
 
-from flask import request
-from nmoscommon.webapi import WebAPI, route, resource_route, abort
-from six.moves.urllib.parse import urljoin
-from six import itervalues
 import requests
+
+from os import urandom
+from flask import request, url_for, redirect
 from socket import gethostname
+from six import itervalues
+from six.moves.urllib.parse import urljoin
 
 from nmoscommon.nmoscommonconfig import config as _config
+from nmoscommon.webapi import WebAPI, route, resource_route, abort
 
 NODE_APIVERSIONS = ["v1.0", "v1.1", "v1.2", "v1.3"]
 if _config.get("https_mode", "disabled") == "enabled":
     NODE_APIVERSIONS.remove("v1.0")
+
 NODE_REGVERSION = _config.get('nodefacade', {}).get('NODE_REGVERSION', 'v1.2')
+
 NODE_APINAMESPACE = "x-nmos"
 NODE_APINAME = "node"
 NODE_APIROOT = '/' + NODE_APINAMESPACE + '/' + NODE_APINAME + '/'
@@ -35,10 +39,15 @@ RESOURCE_TYPES = ["sources", "flows", "devices", "senders", "receivers"]
 
 
 class FacadeAPI(WebAPI):
-    def __init__(self, registry):
-        self.registry = registry
-        self.node_id = registry.node_id
+    def __init__(self, nmos_registry, auth_registry=None):
         super(FacadeAPI, self).__init__()
+        self.app.config["SECRET_KEY"] = urandom(16)  # Required for 'session' in auth client
+        self.registry = nmos_registry
+        self.node_id = nmos_registry.node_id
+        self.auth_registry = auth_registry
+        self.auth_client = None
+        if self.auth_registry:
+            self.auth_registry.init_app(self.app)
 
     @route('/')
     def root(self):
@@ -51,6 +60,24 @@ class FacadeAPI(WebAPI):
     @route(NODE_APIROOT)
     def nameroot(self):
         return [api_version + "/" for api_version in NODE_APIVERSIONS]
+
+    @route(NODE_APIROOT + "oauth/", auto_json=False)
+    def oauth(self):
+        """Redirect to Auth Server's authorization endpoint"""
+        redirect_uri = url_for('_authorization', _external=True)
+        if self.auth_registry.client_name:
+            self.auth_client = getattr(self.auth_registry, self.auth_registry.client_name)
+            return self.auth_client.authorize_redirect(redirect_uri)
+        else:
+            abort(400, "Client not registered with Auth Server")
+
+    @route(NODE_APIROOT + "authorize", auto_json=False)
+    def authorization(self):
+        """Authorize Auth Server redirect to obtain token then store in memory"""
+        self.auth_client = getattr(self.auth_registry, self.auth_registry.client_name)
+        token = self.auth_client.authorize_access_token()
+        self.auth_registry.update_local_token(token)
+        return redirect(url_for('_nameroot'))
 
     @route(NODE_APIROOT + "<api_version>/")
     def versionroot(self, api_version):

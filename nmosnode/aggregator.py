@@ -12,35 +12,48 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import gevent
 from gevent import monkey
 monkey.patch_all()
 
-from six import itervalues # noqa E402
-from six.moves.urllib.parse import urljoin, urlparse # noqa E402
-
-from collections import deque # noqa E402
+import gevent # noqa E402
+import gevent.queue # noqa E402
 import requests # noqa E402
+import traceback # noqa E402
 import json # noqa E402
 import time # noqa E402
+import webbrowser  # noqa E402
 
-import gevent.queue # noqa E402
-
-from nmoscommon.logger import Logger # noqa E402
-from mdnsbridge.mdnsbridgeclient import IppmDNSBridge, NoService, EndOfServiceList # noqa E402
-from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException # noqa E402
+from six import itervalues # noqa E402
+from six.moves.urllib.parse import urljoin, urlparse # noqa E402
+from collections import deque # noqa E402
+from socket import getfqdn  # noqa E402
+from authlib.oauth2.rfc6750 import InvalidTokenError # noqa E402
+from authlib.oauth2 import OAuth2Error # noqa E402
 
 from nmoscommon.nmoscommonconfig import config as _config # noqa E402
-import traceback # noqa E402
+from nmoscommon.logger import Logger # noqa E402
+from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException # noqa E402
+from mdnsbridge.mdnsbridgeclient import IppmDNSBridge, NoService, EndOfServiceList # noqa E402
+
+from .api import NODE_APIROOT # noqa E402
+from .authclient import AuthRegistrar # noqa E402
 
 AGGREGATOR_APINAMESPACE = "x-nmos"
 AGGREGATOR_APINAME = "registration"
+AGGREGATOR_APIROOT = AGGREGATOR_APINAMESPACE + '/' + AGGREGATOR_APINAME
 
 LEGACY_REG_MDNSTYPE = "nmos-registration"
 REGISTRATION_MDNSTYPE = "nmos-register"
 
+# Exponential back off global vars
 BACKOFF_INITIAL_TIMOUT_SECONDS = 5
 BACKOFF_MAX_TIMEOUT_SECONDS = 40
+
+# OAuth client global vars
+HOSTNAME = getfqdn()
+OAUTH_MODE = _config.get("oauth_mode", False)
+ALLOWED_GRANTS = ["authorization_code", "refresh_token", "client_credentials"]
+ALLOWED_SCOPE = "is-04"
 
 
 class InvalidRequest(Exception):
@@ -60,7 +73,7 @@ class Aggregator(object):
     """This class serves as a proxy for the distant aggregation service running elsewhere on the network.
     It will search out aggregators and locate them, falling back to other ones if the one it is connected to
     disappears, and resending data as needed."""
-    def __init__(self, logger=None, mdns_updater=None):
+    def __init__(self, logger=None, mdns_updater=None, auth_registry=None):
         self.logger = Logger("aggregator_proxy", logger)
         self.mdnsbridge = IppmDNSBridge(logger=self.logger)
         self.aggregator_apiversion = None
@@ -83,6 +96,11 @@ class Aggregator(object):
         self._aggregator_failure = False  # Variable to flag when aggregator has returned and unexpected error
         self._backoff_active = False
         self._backoff_period = 0
+
+        self.auth_registrar = None  # Class responsible for registering with Auth Server
+        self.auth_registry = auth_registry  # Top level class that tracks locally registered OAuth clients
+        self.auth_client = None  # Instance of Oauth client responsible for performing token requests
+
         self._reg_queue = gevent.queue.Queue()
         self.main_thread = gevent.spawn(self._main_thread)
         self.queue_thread = gevent.spawn(self._process_queue)
@@ -101,8 +119,8 @@ class Aggregator(object):
 
     def _main_thread(self):
         """The main thread runs in the background.
-        If when it runs the Node is believed to be registered it will perform a heartbeat every 5 seconds.
-        If the Node is not registered it will try register the Node"""
+        If, when it runs, the Node is believed to be registered it will perform a heartbeat every 5 seconds.
+        If the Node is not registered it will try to register the Node"""
         self.logger.writeDebug("Starting main thread")
 
         while self._running:
@@ -165,7 +183,7 @@ class Aggregator(object):
             return False
         try:
             R = self._send("POST", self.aggregator, self.aggregator_apiversion,
-                           "/health/nodes/{}".format(self._node_data["node"]["data"]["id"]))
+                           "health/nodes/{}".format(self._node_data["node"]["data"]["id"]))
 
             if R.status_code == 200 and self._node_data["registered"]:
                 # Continue to registered operation
@@ -200,9 +218,25 @@ class Aggregator(object):
             return False
         except Exception as e:
             # Re-register
-            self.logger.writeWarning("Unexpected error on heartbeat. Marking Node for re-registration\n{}".format(e))
+            self.logger.writeWarning("Unexpected error on heartbeat: {}. Marking Node for re-registration".format(e))
             self._node_data["registered"] = False
             return False
+
+    def _register_auth(self, client_name, client_uri):
+        """Register OAuth client with Authorization Server"""
+        self.logger.writeInfo("Attempting to register dynamically with Auth Server")
+        protocol = "https" if _config.get('https_mode') == "enabled" else "http"
+        auth_registrar = AuthRegistrar(
+            client_name=client_name,
+            redirect_uri=protocol + '://' + HOSTNAME + NODE_APIROOT + 'authorize',
+            client_uri=client_uri,
+            allowed_scope=ALLOWED_SCOPE,
+            allowed_grant=ALLOWED_GRANTS
+        )
+        if auth_registrar.registered is True:
+            return auth_registrar
+        else:
+            self.logger.writeWarning("Unable to successfully register with Authorization Server")
 
     def _register_node(self, node_obj):
         """Attempt to register Node with aggregator
@@ -223,7 +257,7 @@ class Aggregator(object):
             # Try register the Node 3 times with aggregator before failing back to next aggregator
             for i in range(0, 3):
                 R = self._send("POST", self.aggregator, self.aggregator_apiversion,
-                               "/resource", node_obj)
+                               "resource", node_obj)
 
                 if R.status_code == 201:
                     # Continue to registered operation
@@ -326,14 +360,14 @@ class Aggregator(object):
             return self.mdnsbridge.getHrefWithException(self.service_type, None, self.aggregator_apiversion, protocol)
         except NoService:
             self.logger.writeDebug("No Registration services found: {} {} {}".format(
-                                    self.service_type, self.aggregator_apiversion, protocol))
+                self.service_type, self.aggregator_apiversion, protocol))
             if self._mdns_updater is not None:
                 self._mdns_updater.inc_P2P_enable_count()
             self._increase_backoff_period()
             return None
         except EndOfServiceList:
             self.logger.writeDebug("End of Registration services list: {} {} {}".format(
-                                    self.service_type, self.aggregator_apiversion, protocol))
+                self.service_type, self.aggregator_apiversion, protocol))
             self._increase_backoff_period()
             return None
 
@@ -346,7 +380,7 @@ class Aggregator(object):
             self._node_data['registered'] = False
             if url_path is None:
                 R = self._send('DELETE', self.aggregator, self.aggregator_apiversion,
-                               '/resource/nodes/{}'.format(self._node_data['node']["data"]["id"]))
+                               'resource/nodes/{}'.format(self._node_data['node']["data"]["id"]))
             else:
                 parsed_url = urlparse(url_path)
                 R = self._send_request('DELETE', self.aggregator, parsed_url.path)
@@ -369,10 +403,8 @@ class Aggregator(object):
         self.logger.writeDebug("Starting HTTP queue processing thread")
         # Checks queue not empty before quitting to make sure unregister node gets done
         while self._running:
-            if (not self._node_data["registered"] or
-                    self._reg_queue.empty() or
-                    self._backoff_active or
-                    not self.aggregator):
+            if (not self._node_data["registered"] or self._reg_queue.empty()
+                    or self._backoff_active or not self.aggregator):
                 gevent.sleep(1)
             else:
                 try:
@@ -391,7 +423,7 @@ class Aggregator(object):
                             continue
                         try:
                             self._send("POST", self.aggregator, self.aggregator_apiversion,
-                                       "/{}".format(namespace), send_obj)
+                                       "{}".format(namespace), send_obj)
                             self.logger.writeInfo("Registered {} {} {}".format(namespace, res_type, res_key))
                         except InvalidRequest as e:
                             self.logger.writeWarning("Error registering {} {}: {}".format(res_type, res_key, e))
@@ -406,7 +438,7 @@ class Aggregator(object):
                             self._node_data["registered"] = False
                         try:
                             self._send("DELETE", self.aggregator, self.aggregator_apiversion,
-                                       "/{}/{}/{}".format(namespace, translated_type, res_key))
+                                       "{}/{}/{}".format(namespace, translated_type, res_key))
                             self.logger.writeInfo("Un-registered {} {} {}".format(namespace, translated_type, res_key))
                         except InvalidRequest as e:
                             self.logger.writeWarning("Error deleting resource {} {}: {}"
@@ -452,6 +484,48 @@ class Aggregator(object):
             except IndexError:
                 break
 
+    def register_auth_client(self, client_name, client_uri):
+        """Function for Registering OAuth client with Auth Server and instantiating OAuth Client class"""
+
+        if OAUTH_MODE is True:
+            if self.auth_registrar is None:
+                self.auth_registrar = self._register_auth(
+                    client_name=client_name,
+                    client_uri=client_uri
+                )
+            if self.auth_registrar and self.auth_client is None:
+                try:
+                    # Register Node Client
+                    self.auth_registry.register_client(
+                        client_name=client_name, client_uri=client_uri, **self.auth_registrar.server_metadata)
+                    self.logger.writeInfo("Successfully registered Auth Client")
+                except (OSError, IOError):
+                    self.logger.writeError(
+                        "Exception accessing OAuth credentials. This may be a file permissions issue.")
+                    return
+                # Extract the 'RemoteApp' class created when registering
+                self.auth_client = getattr(self.auth_registry, client_name)
+                # Fetch Token
+                self.get_auth_token()
+
+    def get_auth_token(self):
+        """Fetch Access Token either using redirection grant flow or using auth_client"""
+        if self.auth_client is not None and self.auth_registrar is not None:
+            try:
+                if "authorization_code" in self.auth_registrar.client_metadata.get("grant_types", {}):
+                    self.logger.writeInfo(
+                        "Endpoint '/login' on Node API will provide redirect to authorization endpoint on Auth Server.")
+                    return
+                elif "client_credentials" in self.auth_registrar.client_metadata.get("grant_types", {}):
+                    # Fetch Token
+                    token = self.auth_client.fetch_access_token()
+                    # Store token in member variable to be extracted using `fetch_local_token` function
+                    self.auth_registry.bearer_token = token
+                else:
+                    raise OAuth2Error("Client not registered with supported Grant Type")
+            except OAuth2Error as e:
+                self.logger.writeError("Failure fetching access token. {}".format(e))
+
     def register(self, res_type, key, **kwargs):
         """Register 'resource' type data including the Node
            NB: Node registration is managed by heartbeat thread so may take up to 5 seconds! """
@@ -470,6 +544,9 @@ class Aggregator(object):
             send_obj["data"]["id"] = key
 
         if namespace == "resource" and res_type == "node":
+            # Ensure Registered with Auth Server (is there a better place for this)
+            if OAUTH_MODE is True:
+                self.register_auth_client("nmos-node-{}".format(data["id"]), HOSTNAME)
             # Handle special Node type when Node is not registered, by immediately registering
             if self._node_data["node"] is None:
                 # Will trigger registration in main thread
@@ -516,30 +593,31 @@ class Aggregator(object):
                 "registered": self._node_data["registered"]}
 
     def _send(self, method, aggregator, api_ver, url, data=None):
-        """Handle sending request to the registration API, with error handelling
+        """Handle sending request to the registration API, with error handling
         HTTP 200, 201, 204, 409 - Success, return response
         Timeout, HTTP 5xx, Connection Error - Raise ServerSideError Exception
         HTTP 4xx - Raise InvalidRequest Exception"""
 
-        url = "{}/{}/{}{}".format(AGGREGATOR_APINAMESPACE, AGGREGATOR_APINAME, api_ver, url)
+        url = "{}/{}/{}".format(AGGREGATOR_APIROOT, api_ver, url)
 
         try:
-            R = self._send_request(method, aggregator, url, data)
-            if R is None:
+            resp = self._send_request(method, aggregator, url, data)
+            if resp is None:
                 self.logger.writeWarning("No response from aggregator {}".format(aggregator))
                 raise ServerSideError
 
-            elif R.status_code in [200, 201, 204, 409]:
-                return R
+            elif resp.status_code in [200, 201, 204, 409]:
+                return resp
 
-            elif (R.status_code // 100) == 4:
+            elif (resp.status_code // 100) == 4:
                 self.logger.writeWarning("{} response from aggregator: {} {}"
-                                         .format(R.status_code, method, urljoin(aggregator, url)))
-                raise InvalidRequest(R.status_code)
+                                         .format(resp.status_code, method, urljoin(aggregator, url)))
+                self.logger.writeDebug("\nResponse: {}".format(resp.content))
+                raise InvalidRequest(resp.status_code)
 
             else:
                 self.logger.writeWarning("Unexpected status from aggregator {}: {}, {}"
-                                         .format(aggregator, R.status_code, R.content))
+                                         .format(aggregator, resp.status_code, resp.content))
                 raise ServerSideError
 
         except requests.exceptions.RequestException as e:
@@ -547,20 +625,36 @@ class Aggregator(object):
             self.logger.writeWarning("{} from aggregator {}".format(e, aggregator))
             raise ServerSideError
 
-    def _send_request(self, method, aggregator, url, data=None):
+    def _send_request(self, method, aggregator, url_path, data=None):
         """Low level method to send a HTTP request"""
 
-        self.logger.writeDebug("{} {}".format(method, urljoin(aggregator, url)))
+        url = urljoin(aggregator, url_path)
+        self.logger.writeDebug("{} {}".format(method, url))
 
         # We give a long(ish) timeout below, as the async request may succeed after the timeout period
         # has expired, causing the node to be registered twice (potentially at different aggregators).
         # Whilst this isn't a problem in practice, it may cause excessive churn in websocket traffic
         # to web clients - so, sacrifice a little timeliness for things working as designed the
         # majority of the time...
-        if _config.get('prefer_ipv6') is False:
-            return requests.request(method, urljoin(aggregator, url), json=data, timeout=1.0)
+        kwargs = {
+            "method": method, "url": url, "json": data, "timeout": 1.0
+        }
+        if _config.get('prefer_ipv6') is True:
+            kwargs["proxies"] = {'http': ''}
+
+        # If not in OAuth mode, perform standard request
+        if OAUTH_MODE is False or self.auth_client is None:
+            return requests.request(**kwargs)
         else:
-            return requests.request(method, urljoin(aggregator, url), json=data, timeout=1.0, proxies={'http': ''})
+            # If in OAuth Mode, use OAuth client to automatically fetch token / refresh token if expired
+            with self.auth_registry.app.app_context():
+                try:
+                    return self.auth_client.request(**kwargs)
+                # General OAuth Error (e.g. incorrect request details, invalid client, etc.)
+                except OAuth2Error as e:
+                    self.logger.writeError(
+                        "Failed to fetch token before making API call to {}. {}".format(url, e))
+                    self.auth_registrar = self.auth_client = None
 
 
 class MDNSUpdater(object):
@@ -618,7 +712,7 @@ class MDNSUpdater(object):
                 self._mdns_update_queue.put(self._p2p_txt_recs())
 
     def _increment_service_version(self, type):
-        self.service_versions[self.mappings[type]] = self.service_versions[self.mappings[type]]+1
+        self.service_versions[self.mappings[type]] = self.service_versions[self.mappings[type]] + 1
         if self.service_versions[self.mappings[type]] > 255:
             self.service_versions[self.mappings[type]] = 0
 

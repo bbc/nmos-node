@@ -13,46 +13,41 @@
 # limitations under the License.
 
 from __future__ import print_function, absolute_import
-
-import gevent
 from gevent import monkey
 monkey.patch_all()
 
+import gevent # noqa E402
 import time # noqa E402
 import signal # noqa E402
 import os  # noqa E402
 import sys # noqa E402
 import json # noqa E402
-from six import itervalues # noqa E402
+import socket # noqa E402
 
-from nmoscommon.httpserver import HttpServer # noqa E402
-from nmoscommon.utils import get_node_id, translate_api_version # noqa E402
+from six import itervalues # noqa E402
 from socket import gethostname, getfqdn # noqa E402
-from .api import FacadeAPI # noqa E402
-from .registry import FacadeRegistry, FacadeRegistryCleaner # noqa E402
-from .serviceinterface import FacadeInterface # noqa E402
-from os import getpid # noqa E402
+from os import getpid, environ # noqa E402
 from subprocess import check_output # noqa E402
 # Handle if systemd is installed instead of newer cysystemd
-# noqa E402
 try:
-    from cysystemd import daemon
+    from cysystemd import daemon # noqa E402
     SYSTEMD_READY = daemon.Notification.READY
 except ImportError:
-    from systemd import daemon
+    from systemd import daemon # noqa E402
     SYSTEMD_READY = "READY=1"
 
-from .api import NODE_APIVERSIONS # noqa E402
-from .api import NODE_REGVERSION # noqa E402
-from .aggregator import Aggregator # noqa E402
-from .aggregator import MDNSUpdater # noqa E402
-
-from nmoscommon.utils import getLocalIP # noqa E402
 from nmoscommon.mdns import MDNSEngine # noqa E402
 from nmoscommon.logger import Logger # noqa E402
 from nmoscommon import ptptime # noqa E402
+from nmoscommon.httpserver import HttpServer # noqa E402
+from nmoscommon.utils import get_node_id, translate_api_version, getLocalIP # noqa E402
 from nmoscommon.nmoscommonconfig import config as _config # noqa E402
-import socket # noqa E402
+
+from .api import NODE_APIVERSIONS, NODE_REGVERSION, FacadeAPI # noqa E402
+from .registry import FacadeRegistry, FacadeRegistryCleaner # noqa E402
+from .aggregator import Aggregator, MDNSUpdater # noqa E402
+from .authclient import AuthRegistry # noqa E402
+from .serviceinterface import FacadeInterface # noqa E402
 
 NS = 'urn:x-bbcrd:ips:ns:0.1'
 PORT = 12345
@@ -66,6 +61,9 @@ FQDN = getfqdn()
 HTTPS_MODE = _config.get('https_mode', 'disabled')
 ENABLE_P2P = _config.get('node_p2p_enable', True)
 OAUTH_MODE = _config.get('oauth_mode', False)
+
+# BYPASS AUTHLIB SECURITY CHECK DUE TO REVERSE PROXY
+environ["AUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 
 def updateHost():
@@ -109,27 +107,21 @@ class NodeFacadeService:
             "self": "ver_slf"
         }
         self.mdns_updater = None
-        if HTTPS_MODE == "enabled" and ENABLE_P2P:
+        self.auth_registry = AuthRegistry()
+
+        if HTTPS_MODE == "enabled":
+            self.dns_sd_port = DNS_SD_HTTPS_PORT
+            self.protocol = "https"
+        else:
+            self.dns_sd_port = DNS_SD_HTTP_PORT
+            self.protocol = "http"
+        if ENABLE_P2P:
             self.mdns_updater = MDNSUpdater(
-                self.mdns,
-                DNS_SD_TYPE,
-                DNS_SD_NAME,
-                self.mappings,
-                DNS_SD_HTTPS_PORT,
-                self.logger,
-                txt_recs=self._mdns_txt(NODE_APIVERSIONS, "https", OAUTH_MODE)
+                self.mdns, DNS_SD_TYPE, DNS_SD_NAME, self.mappings, self.dns_sd_port, self.logger,
+                txt_recs=self._mdns_txt(NODE_APIVERSIONS, self.protocol, OAUTH_MODE)
             )
-        elif ENABLE_P2P:
-            self.mdns_updater = MDNSUpdater(
-                self.mdns,
-                DNS_SD_TYPE,
-                DNS_SD_NAME,
-                self.mappings,
-                DNS_SD_HTTP_PORT,
-                self.logger,
-                txt_recs=self._mdns_txt(NODE_APIVERSIONS, "http", OAUTH_MODE)
-            )
-        self.aggregator = Aggregator(self.logger, self.mdns_updater)
+
+        self.aggregator = Aggregator(self.logger, self.mdns_updater, self.auth_registry)
 
     def _mdns_txt(self, versions, protocol, oauth_mode):
         return {
@@ -146,27 +138,21 @@ class NodeFacadeService:
         if getLocalIP() != "":
             global HOST
             HOST = updateHost()
-            self.registry.modify_node(href=self.generate_href(),
-                                      host=HOST,
-                                      api={"versions": NODE_APIVERSIONS, "endpoints": self.generate_endpoints()},
-                                      interfaces=self.list_interfaces())
+            self.registry.modify_node(
+                href=self.generate_href(),
+                host=HOST,
+                api={"versions": NODE_APIVERSIONS, "endpoints": self.generate_endpoints()},
+                interfaces=self.list_interfaces()
+            )
 
     def generate_endpoints(self):
         endpoints = []
-        if HTTPS_MODE != "enabled":
-            endpoints.append({
-                "host": HOST,
-                "port": DNS_SD_HTTP_PORT,  # Everything should go via apache proxy
-                "protocol": "http",
-                "authorization": OAUTH_MODE
-            })
-        if HTTPS_MODE != "disabled":
-            endpoints.append({
-                "host": HOST,
-                "port": DNS_SD_HTTPS_PORT,  # Everything should go via apache proxy
-                "protocol": "https",
-                "authorization": OAUTH_MODE
-            })
+        endpoints.append({
+            "host": HOST,
+            "port": self.dns_sd_port,  # Everything should go via apache proxy
+            "protocol": self.protocol,
+            "authorization": OAUTH_MODE
+        })
         return endpoints
 
     def generate_href(self):
@@ -243,15 +229,18 @@ class NodeFacadeService:
             "clocks": [],
             "interfaces": self.list_interfaces()
         }
-        self.registry = FacadeRegistry(self.mappings.keys(),
-                                       self.aggregator,
-                                       self.mdns_updater,
-                                       self.node_id,
-                                       node_data,
-                                       self.logger)
+        self.registry = FacadeRegistry(
+            self.mappings.keys(),
+            self.aggregator,
+            self.mdns_updater,
+            self.node_id,
+            node_data,
+            self.logger
+        )
         self.registry_cleaner = FacadeRegistryCleaner(self.registry)
         self.registry_cleaner.start()
-        self.httpServer = HttpServer(FacadeAPI, PORT, '0.0.0.0', api_args=[self.registry])
+        self.httpServer = HttpServer(
+            FacadeAPI, PORT, '0.0.0.0', api_args=[self.registry, self.auth_registry])
         self.httpServer.start()
         while not self.httpServer.started.is_set():
             self.logger.writeInfo('Waiting for httpserver to start...')
