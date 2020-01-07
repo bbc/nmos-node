@@ -76,7 +76,7 @@ class FacadeAPI(WebAPI):
         """Authorize Auth Server redirect to obtain token then store in memory"""
         self.auth_client = getattr(self.auth_registry, self.auth_registry.client_name)
         token = self.auth_client.authorize_access_token()
-        self.auth_registry.bearer_token = token
+        self.auth_registry.update_local_token(token)
         return redirect(url_for('_nameroot'))
 
     @route(NODE_APIROOT + "<api_version>/")

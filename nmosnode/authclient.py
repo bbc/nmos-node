@@ -39,18 +39,33 @@ logger = Logger("auth_client", None)
 mdnsbridge = IppmDNSBridge(logger=logger)
 
 
-def get_credentials_from_file(filename):
+def read_from_file(file_path=CREDENTIALS_PATH):
     try:
-        with open(filename, 'r') as f:
-            credentials = json.load(f)
-        client_id = credentials['client_id']
-        client_secret = credentials['client_secret']
-        return client_id, client_secret
+        with open(file_path, 'r') as f:
+            contents = json.load(f)
+        return contents
     except (OSError, IOError) as e:
-        logger.writeError("Could not read OAuth2 client credentials from file: {}. {}".format(filename, e))
+        logger.writeError("Could not read from file '{}'. {}".format(file_path, e))
         raise
-    except KeyError as e:
-        logger.writeError("OAuth2 credentials not found in file: {}. {}".format(filename, e))
+
+
+def write_to_file(input_data, file_path=CREDENTIALS_PATH):
+    try:
+        # Load contents if file exists
+        if os.path.exists(file_path):
+            with open(file_path) as f:
+                data = json.load(f)
+            data.update(input_data)
+        else:
+            data = input_data
+        # Write credentials to file
+        with open(file_path, 'w') as f:
+            json.dump(data, f, indent=4, sort_keys=True)
+        return True
+    except (OSError, IOError) as e:
+        logger.writeError(
+            "Could not write to file {}. {}".format(file_path, e)
+        )
         raise
 
 
@@ -90,9 +105,9 @@ class AuthRegistrar(object):
         self.server_metadata = {}  # RFC 8414
         self.client_metadata = {}  # The returned data from client registration
         self.registered = False  # Flag to signify Node is registered with Auth Server
-        self.initialised = self.initialise(CREDENTIALS_PATH)
+        self.initialised = self.initialise()
 
-    def initialise(self, credentials_path):
+    def initialise(self, credentials_path=CREDENTIALS_PATH):
         """Check if credentials file already exists, meaning the device is already registered.
         If not, register with Auth Server and write client credentials to file."""
         try:
@@ -102,11 +117,10 @@ class AuthRegistrar(object):
                 return False
             self._get_server_metadata(auth_href)
             if os.path.isfile(credentials_path):
-                with open(credentials_path, 'r') as f:
-                    data = json.load(f)
+                data = read_from_file(credentials_path)
                 if "client_id" in data and "client_secret" in data:
                     logger.writeWarning("Credentials file already exists. Using existing credentials.")
-                    self.client_id, self.client_secret = get_credentials_from_file(credentials_path)
+                    self.client_id, self.client_secret = self.get_credentials_from_file(credentials_path)
                     self.registered = True
                     return True
             logger.writeInfo("Registering with Authorization Server...")
@@ -123,27 +137,21 @@ class AuthRegistrar(object):
             )
             return False
 
-    def write_credentials_to_file(self, file_path):
+    def write_credentials_to_file(self, credentials_path):
+        credentials = {
+            "client_id": self.client_id,
+            "client_secret": self.client_secret
+        }
+        write_to_file(credentials, credentials_path)
+
+    def get_credentials_from_file(self, credentials_path):
+        data = read_from_file(credentials_path)
         try:
-            credentials = {
-                "client_id": self.client_id,
-                "client_secret": self.client_secret
-            }
-            # Load contents if file exists
-            if os.path.exists(file_path):
-                with open(file_path) as f:
-                    data = json.load(f)
-                data.update(credentials)
-            else:
-                data = credentials
-            # Write credentials to file
-            with open(file_path, 'w') as f:
-                json.dump(data, f)
-            return True
-        except (OSError, IOError) as e:
-            logger.writeError(
-                "Could not write OAuth client credentials to file {}. {}".format(file_path, e)
-            )
+            client_id = data["client_id"]
+            client_secret = data["client_secret"]
+            return client_id, client_secret
+        except KeyError as e:
+            logger.writeError("OAuth2 credentials not found in file: {}. {}".format(credentials_path, e))
             raise
 
     def remove_credentials_from_file(self, file_path):
@@ -246,15 +254,40 @@ class AuthRegistry(OAuth):
         }
 
     def fetch_local_token(self):
-        return self.bearer_token
+        try:
+            data = read_from_file(CREDENTIALS_PATH)
+            if "bearer_token" in data:
+                bearer_token = data['bearer_token']
+                return bearer_token
+            else:
+                return None
+        except (OSError, IOError) as e:
+            logger.writeError(
+                "Could not fetch Bearer Token from file {}. {}".format(CREDENTIALS_PATH, e))
 
-    def update_local_token(self, token):
-        self.bearer_token = token
+    def update_local_token(self, token, refresh_token=None, access_token=None):
+        try:
+            data = read_from_file(CREDENTIALS_PATH)
+            if "bearer_token" not in data:
+                data["bearer_token"] = token
+            else:
+                if "refresh_token" in token:
+                    data["bearer_token"]["refresh_token"] = token["refresh_token"]
+                data["bearer_token"]["access_token"] = token["access_token"]
+                data["bearer_token"]["expires_at"] = token["expires_at"]
+            write_to_file(data)
+        except (OSError, IOError) as e:
+            logger.writeError(
+                "Could not write Bearer Token to file {}. {}".format(CREDENTIALS_PATH, e)
+            )
 
     def register_client(self, client_name, client_uri, credentials_path=CREDENTIALS_PATH, **kwargs):
-        client_id, client_secret = get_credentials_from_file(credentials_path)
         self.client_name = client_name
         self.client_uri = client_uri
+
+        data = read_from_file(credentials_path)
+        client_id = data.get('client_id')
+        client_secret = data.get('client_secret')
 
         # Retrieve server metadata from kwargs, falling back to defaults if not found
         global auth_href
