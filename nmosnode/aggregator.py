@@ -225,9 +225,10 @@ class Aggregator(object):
     def _register_auth(self, client_name, client_uri):
         """Register OAuth client with Authorization Server"""
         self.logger.writeInfo("Attempting to register dynamically with Auth Server")
+        protocol = "https" if _config.get('https_mode') == "enabled" else "http"
         auth_registrar = AuthRegistrar(
             client_name=client_name,
-            redirect_uri='http://' + HOSTNAME + NODE_APIROOT + 'authorize',
+            redirect_uri=protocol + '://' + HOSTNAME + NODE_APIROOT + 'authorize',
             client_uri=client_uri,
             allowed_scope=ALLOWED_SCOPE,
             allowed_grant=ALLOWED_GRANTS
