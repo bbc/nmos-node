@@ -17,7 +17,10 @@ import json
 import requests
 from requests.exceptions import HTTPError
 from six.moves.urllib.parse import urljoin
-from authlib.integrations.flask_client import OAuth
+try:
+    from authlib.integrations.flask_client import OAuth
+except ImportError:
+    from authlib.flask.client import OAuth
 from gevent import sleep
 
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge
