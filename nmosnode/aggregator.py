@@ -357,7 +357,8 @@ class Aggregator(object):
             protocol = "https"
 
         try:
-            return self.mdnsbridge.getHrefWithException(self.service_type, None, self.aggregator_apiversion, protocol)
+            return self.mdnsbridge.getHrefWithException(
+                self.service_type, None, self.aggregator_apiversion, protocol, OAUTH_MODE)
         except NoService:
             self.logger.writeDebug("No Registration services found: {} {} {}".format(
                 self.service_type, self.aggregator_apiversion, protocol))
