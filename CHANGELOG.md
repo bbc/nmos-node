@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.12.1
+- Ensure discovered aggregator has same OAUTH_MODE as Node
+
 ## 0.12.0
 - Add OAuth 2.0 client registration and token request functionality
 
