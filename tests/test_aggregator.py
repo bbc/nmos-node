@@ -213,16 +213,17 @@ class TestAggregator(unittest.TestCase):
         aggregator = "http://example0.com/aggregator/"
         versions = ['v1.0', 'v1.1', 'v1.2', 'v1.3']
         expected_calls = [
-            mock.call(LEGACY_REG_MDNSTYPE, None, versions[0], 'http'),
-            mock.call(LEGACY_REG_MDNSTYPE, None, versions[1], 'http'),
-            mock.call(LEGACY_REG_MDNSTYPE, None, versions[2], 'http'),
-            mock.call(REGISTRATION_MDNSTYPE, None, versions[3], 'http'),
-            mock.call(LEGACY_REG_MDNSTYPE, None, versions[0], 'https'),
-            mock.call(LEGACY_REG_MDNSTYPE, None, versions[1], 'https'),
-            mock.call(LEGACY_REG_MDNSTYPE, None, versions[2], 'https'),
-            mock.call(REGISTRATION_MDNSTYPE, None, versions[3], 'https'),
+            mock.call(LEGACY_REG_MDNSTYPE, None, versions[0], 'http', False),
+            mock.call(LEGACY_REG_MDNSTYPE, None, versions[1], 'http', False),
+            mock.call(LEGACY_REG_MDNSTYPE, None, versions[2], 'http', False),
+            mock.call(REGISTRATION_MDNSTYPE, None, versions[3], 'http', False),
+            mock.call(LEGACY_REG_MDNSTYPE, None, versions[0], 'https', False),
+            mock.call(LEGACY_REG_MDNSTYPE, None, versions[1], 'https', False),
+            mock.call(LEGACY_REG_MDNSTYPE, None, versions[2], 'https', False),
+            mock.call(REGISTRATION_MDNSTYPE, None, versions[3], 'https', False),
         ]
         a.mdnsbridge.getHrefWithException.return_value = aggregator
+        nmosnode.aggregator.OAUTH_MODE = False
 
         for v in versions:
             a._set_api_version_and_srv_type(v)
