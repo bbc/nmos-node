@@ -46,7 +46,7 @@ from nmoscommon.nmoscommonconfig import config as _config # noqa E402
 from .api import NODE_APIVERSIONS, NODE_REGVERSION, FacadeAPI # noqa E402
 from .registry import FacadeRegistry, FacadeRegistryCleaner # noqa E402
 from .aggregator import Aggregator, MDNSUpdater # noqa E402
-from .authclient import AuthRegistry # noqa E402
+from .authclient import AuthRegistry, ALLOWED_SCOPE # noqa E402
 from .serviceinterface import FacadeInterface # noqa E402
 
 NS = 'urn:x-bbcrd:ips:ns:0.1'
@@ -107,7 +107,7 @@ class NodeFacadeService:
             "self": "ver_slf"
         }
         self.mdns_updater = None
-        self.auth_registry = AuthRegistry()
+        self.auth_registry = AuthRegistry(app=None, scope=ALLOWED_SCOPE)
 
         if HTTPS_MODE == "enabled":
             self.dns_sd_port = DNS_SD_HTTPS_PORT

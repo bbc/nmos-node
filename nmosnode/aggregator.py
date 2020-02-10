@@ -36,7 +36,7 @@ from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException # noqa E402
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge, NoService, EndOfServiceList # noqa E402
 
 from .api import NODE_APIROOT # noqa E402
-from .authclient import AuthRegistrar # noqa E402
+from .authclient import AuthRegistrar, ALLOWED_SCOPE # noqa E402
 
 AGGREGATOR_APINAMESPACE = "x-nmos"
 AGGREGATOR_APINAME = "registration"
@@ -53,7 +53,6 @@ BACKOFF_MAX_TIMEOUT_SECONDS = 40
 HOSTNAME = getfqdn()
 OAUTH_MODE = _config.get("oauth_mode", False)
 ALLOWED_GRANTS = ["authorization_code", "refresh_token", "client_credentials"]
-ALLOWED_SCOPE = "is-04"
 
 
 class InvalidRequest(Exception):
@@ -515,7 +514,7 @@ class Aggregator(object):
             try:
                 if "authorization_code" in self.auth_registrar.client_metadata.get("grant_types", {}):
                     self.logger.writeInfo(
-                        "Endpoint '/login' on Node API will provide redirect to authorization endpoint on Auth Server.")
+                        "Endpoint '/oauth' on Node API will provide redirect to authorization endpoint on Auth Server.")
                     return
                 elif "client_credentials" in self.auth_registrar.client_metadata.get("grant_types", {}):
                     # Fetch Token

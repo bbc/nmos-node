@@ -28,11 +28,12 @@ from nmoscommon.logger import Logger
 
 CREDENTIALS_PATH = os.path.join('/var/nmos-node', 'facade.json')
 MDNS_SERVICE_TYPE = "nmos-auth"
+ALLOWED_SCOPE = "registration"
 
 # ENDPOINTS
 AUTH_APIROOT = 'x-nmos/auth/v1.0/'
 SERVER_METADATA_ENDPOINT = '.well-known/oauth-authorization-server/'
-DEFAULT_REGISTRATION_ENDPOINT = urljoin(AUTH_APIROOT, 'register-client')
+DEFAULT_REGISTRATION_ENDPOINT = urljoin(AUTH_APIROOT, 'register')
 DEFAULT_AUTHORIZATION_ENDPOINT = urljoin(AUTH_APIROOT, 'authorize')
 DEFAULT_TOKEN_ENDPOINT = urljoin(AUTH_APIROOT, 'token')
 DEFAULT_REVOCATION_ENDPOINT = urljoin(AUTH_APIROOT, 'revoke')
@@ -76,13 +77,13 @@ def get_dns_service(service_type):
     wait_time = 2
     retry_count = 3
     for count in range(retry_count):
-        auth_href = mdnsbridge.getHref(service_type)
-        if auth_href == "":
+        href = mdnsbridge.getHref(service_type)
+        if href == "":
             logger.writeWarning(
                 "Could not locate {} service type, sleeping for {} seconds".format(MDNS_SERVICE_TYPE, wait_time))
             sleep(wait_time)
         else:
-            return auth_href
+            return href
     logger.writeError("Cannot locate service type {} after {} attempts.".format(MDNS_SERVICE_TYPE, retry_count))
 
 
@@ -245,13 +246,13 @@ class AuthRegistry(OAuth):
     """Subclass of top-level Authlib client.
     Registers Auth Server URIs for requesting access tokens for each registered OAuth2 client.
     Also responsible for storing and fetching bearer token"""
-    def __init__(self, app=None):
+    def __init__(self, app=None, scope=None):
         super(AuthRegistry, self).__init__(app)
         self.client_name = None
         self.client_uri = None
         self.bearer_token = None
         self.client_kwargs = {
-            "scope": "is-04",
+            "scope": scope,
             'token_endpoint_auth_method': 'client_secret_basic',
             'code_challenge_method': 'S256'
         }
@@ -327,7 +328,7 @@ if __name__ == "__main__":  # pragma: no cover
     auth_registrar = AuthRegistrar(
         client_name=client_name,
         client_uri=client_uri,
-        allowed_scope="is-04",
+        allowed_scope="query",
         redirect_uri="www.app.example.com",
         allowed_grant=["password", "authorization_code", "client_credentials"],
         allowed_response="code",
