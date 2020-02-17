@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.12.2
+- Fix redirect URI protocol bug, change registered OAuth scope
+
 ## 0.12.1
 - Ensure discovered aggregator has same OAUTH_MODE as Node
 

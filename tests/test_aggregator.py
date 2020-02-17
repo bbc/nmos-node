@@ -125,7 +125,7 @@ class TestAggregator(unittest.TestCase):
             ("dummy", "testkey", {"test_param": "test_value", "test_param1": "test_value1"}),
             ("node", "testnode", {"test_param": "test_value", "test_param1": "test_value1"})
         ]
-        with mock.patch.object(nmosnode.aggregator, 'OAUTH_MODE', return_value=True):
+        with mock.patch("nmosnode.aggregator.OAUTH_MODE", False):
             for o in objects:
                 a.register(o[0], o[1], **o[2])
 
@@ -153,7 +153,7 @@ class TestAggregator(unittest.TestCase):
             ("dummy", "testkey", {"test_param": "test_value", "test_param1": "test_value1"}),
             ("node", "testnode", {"test_param": "test_value", "test_param1": "test_value1"})
         ]
-        with mock.patch.object(nmosnode.aggregator, 'OAUTH_MODE', return_value=True):
+        with mock.patch("nmosnode.aggregator.OAUTH_MODE", False):
             for o in objects:
                 with mock.patch.object(a, '_unregister_node') as un_register:
                     a.register(o[0], o[1], **o[2])
@@ -223,18 +223,18 @@ class TestAggregator(unittest.TestCase):
             mock.call(REGISTRATION_MDNSTYPE, None, versions[3], 'https', False),
         ]
         a.mdnsbridge.getHrefWithException.return_value = aggregator
-        nmosnode.aggregator.OAUTH_MODE = False
+        with mock.patch("nmosnode.aggregator.OAUTH_MODE", False):
 
-        for v in versions:
-            a._set_api_version_and_srv_type(v)
-            self.assertEqual(a._get_aggregator(), aggregator)
-
-        with mock.patch.dict(nmosnode.aggregator._config, {'https_mode': "enabled"}):
             for v in versions:
                 a._set_api_version_and_srv_type(v)
                 self.assertEqual(a._get_aggregator(), aggregator)
 
-        a.mdnsbridge.getHrefWithException.assert_has_calls(expected_calls)
+            with mock.patch("nmosnode.aggregator.PROTOCOL", "https"):
+                for v in versions:
+                    a._set_api_version_and_srv_type(v)
+                    self.assertEqual(a._get_aggregator(), aggregator)
+
+                a.mdnsbridge.getHrefWithException.assert_has_calls(expected_calls)
 
     def test_get_aggregator_returns_none_when_no_aggregators(self):
         """Test that None is returned, increment P2P counter and backoff period is increased

@@ -15,9 +15,11 @@
 from __future__ import print_function, absolute_import
 import six
 
+import mock
 import unittest
 from nmosnode import registry
 import time
+import nmosnode
 
 # to run: python test_registry.py
 # or, better: python -m unittest discover
@@ -169,43 +171,44 @@ class TestRegistry(unittest.TestCase):
 
     def test_sender_manifest_returns_http(self):
         """Check that Sender manifest_href is not modified in HTTP mode"""
-        registry.HTTPS_MODE = "disabled"
-        self.registry.register_resource("a", 1, "sender", "sender_a_key", {"manifest_href": "http://some-url.com"})
-        sender_resources = self.registry.list_resource("sender")
-        scheme = sender_resources["sender_a_key"]["manifest_href"].split("://")[0]
-        self.assertEqual(scheme, "http")
+        with mock.patch("nmosnode.registry.PROTOCOL", "http"):
+            self.registry.register_resource("a", 1, "sender", "sender_a_key", {"manifest_href": "http://some-url.com"})
+            sender_resources = self.registry.list_resource("sender")
+            scheme = sender_resources["sender_a_key"]["manifest_href"].split("://")[0]
+            self.assertEqual(scheme, "http")
 
     def test_sender_manifest_returns_https(self):
         """Check that Sender manifest_href is modified in HTTPS mode"""
-        registry.HTTPS_MODE = "enabled"
-        self.registry.register_resource("a", 1, "sender", "sender_a_key", {"manifest_href": "http://some-url.com"})
-        sender_resources = self.registry.list_resource("sender")
-        scheme = sender_resources["sender_a_key"]["manifest_href"].split("://")[0]
-        self.assertEqual(scheme, "https")
+        # registry.PROTOCOL = "https"
+        with mock.patch("nmosnode.registry.PROTOCOL", "https"):
+            self.registry.register_resource("a", 1, "sender", "sender_a_key", {"manifest_href": "http://some-url.com"})
+            sender_resources = self.registry.list_resource("sender")
+            scheme = sender_resources["sender_a_key"]["manifest_href"].split("://")[0]
+            self.assertEqual(scheme, "https")
 
     def test_device_controls_return_http(self):
         """Check that Device control hrefs are unmodified in HTTP mode"""
         controls = [{"type": "some-type", "href": "http://some-url.com"},
                     {"type": "some-type", "href": "ws://some-url.com"}]
-        registry.HTTPS_MODE = "disabled"
-        self.registry.register_resource("a", 1, "device", "device_a_key", {"controls": controls,
-                                                                           "max_api_version": "v1.2"})
-        device_resources = self.registry.list_resource("device", "v1.2")
-        self.assertEqual(len(controls), len(device_resources["device_a_key"]["controls"]))
-        for control in device_resources["device_a_key"]["controls"]:
-            self.assertIn(control["href"].split("://")[0], ["http", "ws"])
+        with mock.patch("nmosnode.registry.PROTOCOL", "http"):
+            self.registry.register_resource("a", 1, "device", "device_a_key", {"controls": controls,
+                                                                               "max_api_version": "v1.2"})
+            device_resources = self.registry.list_resource("device", "v1.2")
+            self.assertEqual(len(controls), len(device_resources["device_a_key"]["controls"]))
+            for control in device_resources["device_a_key"]["controls"]:
+                self.assertIn(control["href"].split("://")[0], ["http", "ws"])
 
     def test_device_controls_return_https(self):
         """Check that Device control hrefs are modified in HTTPS mode"""
         controls = [{"type": "some-type", "href": "http://some-url.com"},
                     {"type": "some-type", "href": "ws://some-url.com"}]
-        registry.HTTPS_MODE = "enabled"
-        self.registry.register_resource("a", 1, "device", "device_a_key", {"controls": controls,
-                                                                           "max_api_version": "v1.2"})
-        device_resources = self.registry.list_resource("device", "v1.2")
-        self.assertEqual(len(controls), len(device_resources["device_a_key"]["controls"]))
-        for control in device_resources["device_a_key"]["controls"]:
-            self.assertIn(control["href"].split("://")[0], ["https", "wss"])
+        with mock.patch("nmosnode.registry.PROTOCOL", "https"):
+            self.registry.register_resource("a", 1, "device", "device_a_key", {"controls": controls,
+                                                                               "max_api_version": "v1.2"})
+            device_resources = self.registry.list_resource("device", "v1.2")
+            self.assertEqual(len(controls), len(device_resources["device_a_key"]["controls"]))
+            for control in device_resources["device_a_key"]["controls"]:
+                self.assertIn(control["href"].split("://")[0], ["https", "wss"])
 
 
 if __name__ == '__main__':
