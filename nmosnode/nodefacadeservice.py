@@ -43,22 +43,20 @@ from nmoscommon.httpserver import HttpServer # noqa E402
 from nmoscommon.utils import get_node_id, translate_api_version, getLocalIP # noqa E402
 from nmoscommon.nmoscommonconfig import config as _config # noqa E402
 
-from .api import NODE_APIVERSIONS, NODE_REGVERSION, FacadeAPI # noqa E402
+from .api import NODE_APIVERSIONS, NODE_REGVERSION, PROTOCOL, FacadeAPI # noqa E402
 from .registry import FacadeRegistry, FacadeRegistryCleaner # noqa E402
-from .aggregator import Aggregator, MDNSUpdater # noqa E402
+from .aggregator import Aggregator, MDNSUpdater, ALLOWED_SCOPE, FQDN # noqa E402
 from .authclient import AuthRegistry # noqa E402
 from .serviceinterface import FacadeInterface # noqa E402
 
 NS = 'urn:x-bbcrd:ips:ns:0.1'
 PORT = 12345
 HOSTNAME = gethostname().split(".", 1)[0]
-FQDN = getfqdn()
 
 # HTTPS under test only at present
 # enabled = Use HTTPS only in all URLs and mDNS adverts
 # disabled = Use HTTP only in all URLs and mDNS adverts
 # mixed = Use HTTP in all URLs, but additionally advertise an HTTPS endpoint for discovery of this API only
-HTTPS_MODE = _config.get('https_mode', 'disabled')
 ENABLE_P2P = _config.get('node_p2p_enable', True)
 OAUTH_MODE = _config.get('oauth_mode', False)
 
@@ -107,14 +105,13 @@ class NodeFacadeService:
             "self": "ver_slf"
         }
         self.mdns_updater = None
-        self.auth_registry = AuthRegistry()
+        self.auth_registry = AuthRegistry(app=None, scope=ALLOWED_SCOPE)
 
-        if HTTPS_MODE == "enabled":
+        self.protocol = PROTOCOL
+        if PROTOCOL == "https":
             self.dns_sd_port = DNS_SD_HTTPS_PORT
-            self.protocol = "https"
         else:
             self.dns_sd_port = DNS_SD_HTTP_PORT
-            self.protocol = "http"
         if ENABLE_P2P:
             self.mdns_updater = MDNSUpdater(
                 self.mdns, DNS_SD_TYPE, DNS_SD_NAME, self.mappings, self.dns_sd_port, self.logger,
@@ -156,10 +153,7 @@ class NodeFacadeService:
         return endpoints
 
     def generate_href(self):
-        if HTTPS_MODE == "enabled":
-            return "https://{}/".format(HOST)
-        else:
-            return "http://{}/".format(HOST)
+        return "{}://{}/".format(PROTOCOL, HOST)
 
     def list_interfaces(self):
         interfaces = {}

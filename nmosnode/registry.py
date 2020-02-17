@@ -24,10 +24,9 @@ from six import itervalues
 from nmoscommon.logger import Logger
 from nmoscommon import ptptime
 from nmoscommon.mdns.mdnsExceptions import ServiceAlreadyExistsException
-from nmoscommon.nmoscommonconfig import config as _config
 from nmoscommon.utils import translate_api_version, api_ver_compare
 
-from .api import NODE_REGVERSION
+from .api import NODE_REGVERSION, PROTOCOL
 
 try:
     # Use internal BBC RD ipputils to get PTP if available
@@ -48,8 +47,6 @@ RES_NOEXISTS = 2
 RES_UNAUTHORISED = 3
 RES_UNSUPPORTED = 4
 RES_OTHERERROR = 5
-
-HTTPS_MODE = _config.get('https_mode', 'disabled')
 
 
 class FacadeRegistryCleaner(threading.Thread):
@@ -319,7 +316,7 @@ class FacadeRegistry(object):
     def preprocess_url(self, url):
         parsed_url = urlparse(url)
         scheme = parsed_url.scheme
-        if HTTPS_MODE == "enabled":
+        if PROTOCOL == "https":
             if scheme == "http":
                 scheme = "https"
             elif scheme == "ws":
