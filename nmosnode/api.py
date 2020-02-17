@@ -18,23 +18,24 @@ import requests
 
 from os import urandom
 from flask import request, url_for, redirect
-from socket import gethostname
 from six import itervalues
 from six.moves.urllib.parse import urljoin
 
 from nmoscommon.nmoscommonconfig import config as _config
 from nmoscommon.webapi import WebAPI, route, resource_route, abort
 
-NODE_APIVERSIONS = ["v1.0", "v1.1", "v1.2", "v1.3"]
-if _config.get("https_mode", "disabled") == "enabled":
-    NODE_APIVERSIONS.remove("v1.0")
-
+# Config Parameters
+PROTOCOL = "https" if _config.get('https_mode') == "enabled" else "http"
 NODE_REGVERSION = _config.get('nodefacade', {}).get('NODE_REGVERSION', 'v1.2')
 
+# Node API Path Information
 NODE_APINAMESPACE = "x-nmos"
 NODE_APINAME = "node"
 NODE_APIROOT = '/' + NODE_APINAMESPACE + '/' + NODE_APINAME + '/'
-HOSTNAME = gethostname().split(".", 1)[0]
+NODE_APIVERSIONS = ["v1.0", "v1.1", "v1.2", "v1.3"]
+if PROTOCOL == "https":
+    NODE_APIVERSIONS.remove("v1.0")
+
 RESOURCE_TYPES = ["sources", "flows", "devices", "senders", "receivers"]
 
 
@@ -64,7 +65,7 @@ class FacadeAPI(WebAPI):
     @route(NODE_APIROOT + "oauth/", auto_json=False)
     def oauth(self):
         """Redirect to Auth Server's authorization endpoint"""
-        redirect_uri = url_for('_authorization', _external=True)
+        redirect_uri = url_for('_authorization', _external=True, _scheme=PROTOCOL)
         if self.auth_registry.client_name:
             self.auth_client = getattr(self.auth_registry, self.auth_registry.client_name)
             return self.auth_client.authorize_redirect(redirect_uri)

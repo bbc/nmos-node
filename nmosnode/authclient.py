@@ -28,7 +28,6 @@ from nmoscommon.logger import Logger
 
 CREDENTIALS_PATH = os.path.join('/var/nmos-node', 'facade.json')
 MDNS_SERVICE_TYPE = "nmos-auth"
-ALLOWED_SCOPE = "registration"
 
 # ENDPOINTS
 AUTH_APIROOT = 'x-nmos/auth/v1.0/'

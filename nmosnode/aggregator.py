@@ -35,23 +35,26 @@ from nmoscommon.logger import Logger # noqa E402
 from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException # noqa E402
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge, NoService, EndOfServiceList # noqa E402
 
-from .api import NODE_APIROOT # noqa E402
-from .authclient import AuthRegistrar, ALLOWED_SCOPE # noqa E402
+from .api import NODE_APIROOT, PROTOCOL # noqa E402
+from .authclient import AuthRegistrar # noqa E402
 
+# MDNS Service Names
+LEGACY_REG_MDNSTYPE = "nmos-registration"
+REGISTRATION_MDNSTYPE = "nmos-register"
+
+# Registry path
 AGGREGATOR_APINAMESPACE = "x-nmos"
 AGGREGATOR_APINAME = "registration"
 AGGREGATOR_APIROOT = AGGREGATOR_APINAMESPACE + '/' + AGGREGATOR_APINAME
-
-LEGACY_REG_MDNSTYPE = "nmos-registration"
-REGISTRATION_MDNSTYPE = "nmos-register"
 
 # Exponential back off global vars
 BACKOFF_INITIAL_TIMOUT_SECONDS = 5
 BACKOFF_MAX_TIMEOUT_SECONDS = 40
 
 # OAuth client global vars
-HOSTNAME = getfqdn()
+FQDN = getfqdn()
 OAUTH_MODE = _config.get("oauth_mode", False)
+ALLOWED_SCOPE = "registration"
 ALLOWED_GRANTS = ["authorization_code", "refresh_token", "client_credentials"]
 
 
@@ -224,10 +227,9 @@ class Aggregator(object):
     def _register_auth(self, client_name, client_uri):
         """Register OAuth client with Authorization Server"""
         self.logger.writeInfo("Attempting to register dynamically with Auth Server")
-        protocol = "https" if _config.get('https_mode') == "enabled" else "http"
         auth_registrar = AuthRegistrar(
             client_name=client_name,
-            redirect_uri=protocol + '://' + HOSTNAME + NODE_APIROOT + 'authorize',
+            redirect_uri=PROTOCOL + '://' + FQDN + NODE_APIROOT + 'authorize',
             client_uri=client_uri,
             allowed_scope=ALLOWED_SCOPE,
             allowed_grant=ALLOWED_GRANTS
@@ -351,23 +353,19 @@ class Aggregator(object):
         If no aggregator found increment P2P counter, update cache and increase backoff
         If reached the end of available aggregators update cache and increase backoff"""
 
-        protocol = "http"
-        if _config.get('https_mode') == "enabled":
-            protocol = "https"
-
         try:
             return self.mdnsbridge.getHrefWithException(
-                self.service_type, None, self.aggregator_apiversion, protocol, OAUTH_MODE)
+                self.service_type, None, self.aggregator_apiversion, PROTOCOL, OAUTH_MODE)
         except NoService:
             self.logger.writeDebug("No Registration services found: {} {} {}".format(
-                self.service_type, self.aggregator_apiversion, protocol))
+                self.service_type, self.aggregator_apiversion, PROTOCOL))
             if self._mdns_updater is not None:
                 self._mdns_updater.inc_P2P_enable_count()
             self._increase_backoff_period()
             return None
         except EndOfServiceList:
             self.logger.writeDebug("End of Registration services list: {} {} {}".format(
-                self.service_type, self.aggregator_apiversion, protocol))
+                self.service_type, self.aggregator_apiversion, PROTOCOL))
             self._increase_backoff_period()
             return None
 
@@ -546,7 +544,7 @@ class Aggregator(object):
         if namespace == "resource" and res_type == "node":
             # Ensure Registered with Auth Server (is there a better place for this)
             if OAUTH_MODE is True:
-                self.register_auth_client("nmos-node-{}".format(data["id"]), HOSTNAME)
+                self.register_auth_client("nmos-node-{}".format(data["id"]), FQDN)
             # Handle special Node type when Node is not registered, by immediately registering
             if self._node_data["node"] is None:
                 # Will trigger registration in main thread
