@@ -188,10 +188,7 @@ class AuthRegistrar(object):
             "registration_endpoint": urljoin(auth_href, DEFAULT_REGISTRATION_ENDPOINT),
             "jwks_uri": urljoin(auth_href, DEFAULT_JWKS_ENDPOINT),
             "revocation_endpoint": urljoin(auth_href, DEFAULT_REVOCATION_ENDPOINT),
-            "issuer": auth_href,
-            "token_endpoint_auth_methods_supported": ["client_secret_basic"],
-            "token_endpoint_auth_signing_alg_values_supported": ["RS512"],
-            "response_types_supported": ["code"]
+            "issuer": auth_href
         }
         return default_metadata
 
@@ -328,7 +325,7 @@ if __name__ == "__main__":  # pragma: no cover
     auth_registrar = AuthRegistrar(
         client_name=client_name,
         client_uri=client_uri,
-        allowed_scope="query",
+        allowed_scope="registration",
         redirect_uri="www.app.example.com",
         allowed_grant=["password", "authorization_code", "client_credentials"],
         allowed_response="code",
