@@ -198,9 +198,9 @@ class NodeFacadeService:
 
     def start(self):
         if self.running:
-            gevent.signal(signal.SIGINT, self.sig_handler)
-            gevent.signal(signal.SIGTERM, self.sig_handler)
-            gevent.signal(signal.SIGHUP, self.sig_hup_handler)
+            gevent.signal_handler(signal.SIGINT, self.sig_handler)
+            gevent.signal_handler(signal.SIGTERM, self.sig_handler)
+            gevent.signal_handler(signal.SIGHUP, self.sig_hup_handler)
 
         self.mdns.start()
         self.node_id = get_node_id()

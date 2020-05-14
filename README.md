@@ -13,7 +13,7 @@ Package providing a basic NMOS Node API implementation. It takes the form of a "
 ### Requirements
 
 *   Linux (untested on Windows and Mac)
-*   Python 2.7
+*   Python 2.7 (also Python 3.6.9 on Ubuntu 18.04)
 *   Python Pip
 *   [NMOS Common](https://github.com/bbc/nmos-common)
 
