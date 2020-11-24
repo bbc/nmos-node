@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.12.3
+- Add missing dependency
+
 ## 0.12.2
 - Fix redirect URI protocol bug, change registered OAuth scope
 
