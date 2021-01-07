@@ -36,7 +36,7 @@ from nmoscommon.mdns.mdnsExceptions import ServiceNotFoundException # noqa E402
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge, NoService, EndOfServiceList # noqa E402
 
 from .api import NODE_APIROOT, PROTOCOL # noqa E402
-from .authclient import AuthRegistrar # noqa E402
+from .authclient import AuthRegistrar, ALLOWED_SCOPE, ALLOWED_GRANTS, ALLOWED_RESPONSE  # noqa E402
 
 # MDNS Service Names
 LEGACY_REG_MDNSTYPE = "nmos-registration"
@@ -54,8 +54,6 @@ BACKOFF_MAX_TIMEOUT_SECONDS = 40
 # OAuth client global vars
 FQDN = getfqdn()
 OAUTH_MODE = _config.get("oauth_mode", False)
-ALLOWED_SCOPE = "registration"
-ALLOWED_GRANTS = ["authorization_code", "refresh_token", "client_credentials"]
 
 
 class InvalidRequest(Exception):
@@ -229,10 +227,11 @@ class Aggregator(object):
         self.logger.writeInfo("Attempting to register dynamically with Auth Server")
         auth_registrar = AuthRegistrar(
             client_name=client_name,
-            redirect_uri=PROTOCOL + '://' + FQDN + NODE_APIROOT + 'authorize',
             client_uri=client_uri,
+            redirect_uris=[PROTOCOL + '://' + FQDN + NODE_APIROOT + 'authorize'],
             allowed_scope=ALLOWED_SCOPE,
-            allowed_grant=ALLOWED_GRANTS
+            allowed_grants=ALLOWED_GRANTS,
+            allowed_response=ALLOWED_RESPONSE
         )
         if auth_registrar.registered is True:
             return auth_registrar
@@ -510,19 +509,20 @@ class Aggregator(object):
         """Fetch Access Token either using redirection grant flow or using auth_client"""
         if self.auth_client is not None and self.auth_registrar is not None:
             try:
-                if "authorization_code" in self.auth_registrar.client_metadata.get("grant_types", {}):
+                registered_grants = self.auth_registrar.client_metadata.get("grant_types", {})
+                if "authorization_code" in registered_grants:
                     self.logger.writeInfo(
-                        "Endpoint '/oauth' on Node API will provide redirect to authorization endpoint on Auth Server.")
-                    return
-                elif "client_credentials" in self.auth_registrar.client_metadata.get("grant_types", {}):
-                    # Fetch Token
+                        "Endpoint '/oauth' on Node API will provide redirect to authorization endpoint on Auth Server."
+                    )
+                if "client_credentials" in registered_grants:
+                    # Fetch Token using Client Credentials Grant
                     token = self.auth_client.fetch_access_token()
-                    # Store token in member variable to be extracted using `fetch_local_token` function
-                    self.auth_registry.bearer_token = token
+                    self.auth_registry.update_local_token(token)
                 else:
-                    raise OAuth2Error("Client not registered with supported Grant Type")
+                    raise OAuth2Error("Client not registered with supported Grant Type. Must be one of: {}".format(
+                        registered_grants))
             except OAuth2Error as e:
-                self.logger.writeError("Failure fetching access token. {}".format(e))
+                self.logger.writeError("Failure fetching access token: {}".format(e))
 
     def register(self, res_type, key, **kwargs):
         """Register 'resource' type data including the Node
@@ -544,7 +544,10 @@ class Aggregator(object):
         if namespace == "resource" and res_type == "node":
             # Ensure Registered with Auth Server (is there a better place for this)
             if OAUTH_MODE is True:
-                self.register_auth_client("nmos-node-{}".format(data["id"]), FQDN)
+                self.register_auth_client(
+                    client_name="nmos-node-{}".format(data["id"]),
+                    client_uri="{}://{}".format(PROTOCOL, FQDN)
+                )
             # Handle special Node type when Node is not registered, by immediately registering
             if self._node_data["node"] is None:
                 # Will trigger registration in main thread

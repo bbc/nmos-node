@@ -16,27 +16,22 @@ import os
 import json
 import requests
 from requests.exceptions import HTTPError
-from six.moves.urllib.parse import urljoin
+from werkzeug.exceptions import ServiceUnavailable
 try:
     from authlib.integrations.flask_client import OAuth
 except ImportError:
     from authlib.flask.client import OAuth
-from gevent import sleep
 
 from mdnsbridge.mdnsbridgeclient import IppmDNSBridge
 from nmoscommon.logger import Logger
+from nmoscommon.auth.auth_middleware import get_auth_server_url, get_auth_server_metadata
 
 CREDENTIALS_PATH = os.path.join('/var/nmos-node', 'facade.json')
 MDNS_SERVICE_TYPE = "nmos-auth"
 
-# ENDPOINTS
-AUTH_APIROOT = 'x-nmos/auth/v1.0/'
-SERVER_METADATA_ENDPOINT = '.well-known/oauth-authorization-server/'
-DEFAULT_REGISTRATION_ENDPOINT = urljoin(AUTH_APIROOT, 'register')
-DEFAULT_AUTHORIZATION_ENDPOINT = urljoin(AUTH_APIROOT, 'authorize')
-DEFAULT_TOKEN_ENDPOINT = urljoin(AUTH_APIROOT, 'token')
-DEFAULT_REVOCATION_ENDPOINT = urljoin(AUTH_APIROOT, 'revoke')
-DEFAULT_JWKS_ENDPOINT = urljoin(AUTH_APIROOT, 'jwks')
+ALLOWED_SCOPE = "registration"  # space-delimited list of scopes as per rfc7591
+ALLOWED_GRANTS = ["authorization_code", "refresh_token", "client_credentials"]
+ALLOWED_RESPONSE = ["code"]
 
 logger = Logger("auth_client", None)
 mdnsbridge = IppmDNSBridge(logger=logger)
@@ -72,34 +67,21 @@ def write_to_file(input_data, file_path=CREDENTIALS_PATH):
         raise
 
 
-def get_dns_service(service_type):
-    wait_time = 2
-    retry_count = 3
-    for count in range(retry_count):
-        href = mdnsbridge.getHref(service_type)
-        if href == "":
-            logger.writeWarning(
-                "Could not locate {} service type, sleeping for {} seconds".format(MDNS_SERVICE_TYPE, wait_time))
-            sleep(wait_time)
-        else:
-            return href
-    logger.writeError("Cannot locate service type {} after {} attempts.".format(MDNS_SERVICE_TYPE, retry_count))
-
-
 # Globally define auth_href so it can be shared between both classes
 auth_href = None
 
 
 class AuthRegistrar(object):
     """Class responsible for registering an OAuth2 client with the Auth Server"""
-    def __init__(self, client_name, redirect_uri, client_uri=None,
-                 allowed_scope=None, allowed_grant=["authorization_code"],
-                 allowed_response="code", auth_method="client_secret_basic"):
+    def __init__(self, client_name, redirect_uris=[], client_uri=None,
+                 allowed_scope=None, allowed_grants=["authorization_code"],
+                 allowed_response=["code"], auth_method="client_secret_basic",
+                 credentials_path=CREDENTIALS_PATH):
         self.client_name = client_name
         self.client_uri = client_uri
-        self.redirect_uri = redirect_uri
         self.allowed_scope = allowed_scope
-        self.allowed_grant = "\n".join(allowed_grant)
+        self.redirect_uris = redirect_uris
+        self.allowed_grants = allowed_grants
         self.allowed_response = allowed_response
         self.auth_method = auth_method
 
@@ -108,17 +90,13 @@ class AuthRegistrar(object):
         self.server_metadata = {}  # RFC 8414
         self.client_metadata = {}  # The returned data from client registration
         self.registered = False  # Flag to signify Node is registered with Auth Server
-        self.initialised = self.initialise()
+        self.initialised = self.initialise(credentials_path)
 
-    def initialise(self, credentials_path=CREDENTIALS_PATH):
+    def initialise(self, credentials_path):
         """Check if credentials file already exists, meaning the device is already registered.
         If not, register with Auth Server and write client credentials to file."""
         try:
-            global auth_href
-            auth_href = get_dns_service(MDNS_SERVICE_TYPE)
-            if not auth_href:
-                return False
-            self._get_server_metadata(auth_href)
+            self.server_metadata = self._get_metadata(MDNS_SERVICE_TYPE)
             if os.path.isfile(credentials_path):
                 data = read_from_file(credentials_path)
                 if "client_id" in data and "client_secret" in data:
@@ -128,9 +106,9 @@ class AuthRegistrar(object):
                     return True
             logger.writeInfo("Registering with Authorization Server...")
             if self.registered is False:
-                self.client_metadata = self.send_oauth_registration_request()
+                self.client_metadata = self.send_dynamic_registration_request()
                 self.registered = True
-            logger.writeInfo("Writing OAuth2 credentials to file...")
+            logger.writeInfo("Registration Successful. Writing OAuth2 credentials to file...")
             # what if registered but fail to write credentials??
             self.write_credentials_to_file(credentials_path)
             return True
@@ -139,6 +117,27 @@ class AuthRegistrar(object):
                 "Unable to initialise OAuth Client with client credentials. {}".format(e)
             )
             return False
+
+    def _get_metadata(self, service_type):
+        auth_url = get_auth_server_url(service_type)
+        global auth_href
+        if auth_url:
+            auth_href = auth_url
+        elif not auth_url and auth_href:
+            logger.writeWarning(
+                "Could not find service of type: '{}'. Using previously found metadata endpoint: {}.".format(
+                    service_type, auth_href))
+        else:
+            logger.writeError(
+                "No DNS-SD services of type '{}' could be found".format(service_type))
+            raise ServiceUnavailable("No DNS-SD services of type '{}' could be found".format(service_type))
+        metadata, metadata_url = get_auth_server_metadata(auth_href)
+        if metadata is not None:
+            return metadata
+        else:
+            # Construct default URI
+            logger.writeError("Could not locate metadata at: {}".format(auth_href))
+            raise ServiceUnavailable("Could not locate endpoint at: {}".format(auth_href))
 
     def write_credentials_to_file(self, credentials_path):
         credentials = {
@@ -180,48 +179,27 @@ class AuthRegistrar(object):
             )
             raise
 
-    def _make_default_metadata(self, auth_href):
-        default_metadata = {
-            "authorization_endpoint": urljoin(auth_href, DEFAULT_AUTHORIZATION_ENDPOINT),
-            "token_endpoint": urljoin(auth_href, DEFAULT_TOKEN_ENDPOINT),
-            "registration_endpoint": urljoin(auth_href, DEFAULT_REGISTRATION_ENDPOINT),
-            "jwks_uri": urljoin(auth_href, DEFAULT_JWKS_ENDPOINT),
-            "revocation_endpoint": urljoin(auth_href, DEFAULT_REVOCATION_ENDPOINT),
-            "issuer": auth_href
-        }
-        return default_metadata
-
-    def _get_server_metadata(self, auth_href):
+    def send_dynamic_registration_request(self, registration_url=None):
         try:
-            url = urljoin(auth_href, SERVER_METADATA_ENDPOINT)
-            resp = requests.get(url, timeout=0.5, proxies={'http': ''})
-            resp.raise_for_status()  # Raise exception if not a 2XX status code
-            metadata = resp.json()
-        except Exception as e:
-            logger.writeWarning("Unable to retrieve server metadata - falling back to defaults. {}".format(e))
-            metadata = self._make_default_metadata(auth_href)
-        finally:
-            self.server_metadata = metadata
+            if not registration_url:
+                registration_url = self.server_metadata.get('registration_endpoint')
 
-    def send_oauth_registration_request(self):
-        try:
-            oauth_registration_href = self.server_metadata.get('registration_endpoint')
-            logger.writeDebug('Registration endpoint href is: {}'.format(oauth_registration_href))
+            logger.writeDebug('Registration endpoint href is: {}'.format(registration_url))
 
             data = {
                 "client_name": self.client_name,
                 "client_uri": self.client_uri,
                 "scope": self.allowed_scope,
-                "redirect_uris": self.redirect_uri,
-                "grant_types": self.allowed_grant,
+                "redirect_uris": self.redirect_uris,
+                "grant_types": self.allowed_grants,
                 "response_types": self.allowed_response,
                 "token_endpoint_auth_method": self.auth_method
             }
 
             # Decide how Basic Auth details are retrieved - user input? Retrieved from file?
             reg_resp = requests.post(
-                oauth_registration_href,
-                data=data,
+                registration_url,
+                json=data,
                 timeout=0.5,
                 proxies={'http': ''}
             )
@@ -253,9 +231,9 @@ class AuthRegistry(OAuth):
             'code_challenge_method': 'S256'
         }
 
-    def fetch_local_token(self):
+    def fetch_local_token(self, credentials_path=CREDENTIALS_PATH):
         try:
-            data = read_from_file(CREDENTIALS_PATH)
+            data = read_from_file(credentials_path)
             if "bearer_token" in data:
                 bearer_token = data['bearer_token']
                 return bearer_token
@@ -263,11 +241,11 @@ class AuthRegistry(OAuth):
                 return None
         except (OSError, IOError) as e:
             logger.writeError(
-                "Could not fetch Bearer Token from file {}. {}".format(CREDENTIALS_PATH, e))
+                "Could not fetch Bearer Token from file {}. {}".format(credentials_path, e))
 
-    def update_local_token(self, token, refresh_token=None, access_token=None):
+    def update_local_token(self, token, refresh_token=None, access_token=None, credentials_path=CREDENTIALS_PATH):
         try:
-            data = read_from_file(CREDENTIALS_PATH)
+            data = read_from_file(credentials_path)
             if "bearer_token" not in data:
                 data["bearer_token"] = token
             else:
@@ -276,32 +254,38 @@ class AuthRegistry(OAuth):
                 data["bearer_token"]["access_token"] = token["access_token"]
                 data["bearer_token"]["expires_at"] = token["expires_at"]
             write_to_file(data)
+            logger.writeDebug("Updated local Bearer Token")
         except (OSError, IOError) as e:
             logger.writeError(
-                "Could not write Bearer Token to file {}. {}".format(CREDENTIALS_PATH, e)
+                "Could not write Bearer Token to file {}. {}".format(credentials_path, e)
             )
 
     def register_client(self, client_name, client_uri, credentials_path=CREDENTIALS_PATH, **kwargs):
         self.client_name = client_name
         self.client_uri = client_uri
 
-        data = read_from_file(credentials_path)
-        client_id = data.get('client_id')
-        client_secret = data.get('client_secret')
+        node_data = read_from_file(credentials_path)
+        client_id = node_data.get('client_id')
+        client_secret = node_data.get('client_secret')
 
-        # Retrieve server metadata from kwargs, falling back to defaults if not found
         global auth_href
-        token_url = getattr(kwargs, 'token_endpoint', urljoin(auth_href, DEFAULT_TOKEN_ENDPOINT))
-        authorize_url = getattr(
-            kwargs, 'authorization_endpoint', urljoin(auth_href, DEFAULT_AUTHORIZATION_ENDPOINT))
+        metadata, metadata_url = get_auth_server_metadata(auth_href)
+        server_metadata = metadata if metadata is not None else kwargs
+
+        # Retrieve server metadata from kwargs
+        token_url = server_metadata.get('token_endpoint', None)
+        authorize_url = server_metadata.get('authorization_endpoint', None)
+        jwks_url = server_metadata.get("jwks_uri", None)
 
         return self.register(
             name=client_name,
             client_id=client_id,
             client_secret=client_secret,
+            server_metadata_url=metadata_url,
             access_token_url=token_url,
             refresh_token_url=token_url,
             authorize_url=authorize_url,
+            jwks_uri=jwks_url,
             api_base_url=client_uri,
             client_kwargs=self.client_kwargs,
             fetch_token=self.fetch_local_token,
@@ -319,21 +303,30 @@ if __name__ == "__main__":  # pragma: no cover
     auth_registry = AuthRegistry(app)
 
     client_name = "test_oauth_client"
-    client_uri = "www.example.com"
+    client_uri = "https://example.com"
 
     auth_registrar = AuthRegistrar(
         client_name=client_name,
         client_uri=client_uri,
         allowed_scope="registration",
-        redirect_uri="www.app.example.com",
-        allowed_grant=["password", "authorization_code", "client_credentials"],
-        allowed_response="code",
+        redirect_uris=["https://www.app.example.com"],
+        allowed_grants=["authorization_code", "client_credentials"],
+        allowed_response=["code"],
         auth_method="client_secret_basic"
     )
+
     if auth_registrar.initialised is True:
         # Register Client
-        auth_registry.register_client(client_name=client_name, client_uri=client_uri, credentials_path=CREDENTIALS_PATH)
+        auth_registry.register_client(
+            client_name=client_name,
+            client_uri=client_uri,
+            credentials_path=CREDENTIALS_PATH,
+            **auth_registrar.server_metadata
+        )
+
         # Extract the 'RemoteApp' class created when registering
         auth_client = getattr(auth_registry, client_name)
         # Fetch Token
-        print(auth_client.fetch_access_token())
+        token = auth_client.fetch_access_token()
+        print("BEARER TOKEN: ", token)
+        auth_registry.update_local_token(token)

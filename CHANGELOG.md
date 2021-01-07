@@ -1,5 +1,8 @@
 # NMOS Node API Implementation Changelog
 
+## 0.12.4
+- Update authclient.py and ensure client_credentials OAuth flow is used if registered with it
+
 ## 0.12.3
 - Add missing dependency
 

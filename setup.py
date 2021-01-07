@@ -21,7 +21,7 @@ import os
 
 # Basic metadata
 name = "nodefacade"
-version = "0.12.3"
+version = "0.12.4"
 description = "BBC implementation of an AMWA NMOS Node API"
 url = "https://github.com/bbc/nmos-node"
 author = "Peter Brightwell"
@@ -61,11 +61,12 @@ package_names = packages.keys()
 packages_required = [
     "six",
     "cysystemd",
-    "nmoscommon>=0.19.13",
+    "nmoscommon>=0.20.0",
     "requests",
     "gevent",
     "mdnsbridge>=0.9.2",
-    "authlib"
+    "authlib",
+    "cryptography>3.0.0"
 ]
 
 deps_required = []

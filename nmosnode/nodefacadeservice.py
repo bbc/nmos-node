@@ -45,7 +45,7 @@ from nmoscommon.nmoscommonconfig import config as _config # noqa E402
 
 from .api import NODE_APIVERSIONS, NODE_REGVERSION, PROTOCOL, FacadeAPI # noqa E402
 from .registry import FacadeRegistry, FacadeRegistryCleaner # noqa E402
-from .aggregator import Aggregator, MDNSUpdater, ALLOWED_SCOPE, FQDN # noqa E402
+from .aggregator import Aggregator, MDNSUpdater, ALLOWED_SCOPE, OAUTH_MODE, FQDN # noqa E402
 from .authclient import AuthRegistry # noqa E402
 from .serviceinterface import FacadeInterface # noqa E402
 
@@ -58,7 +58,6 @@ HOSTNAME = gethostname().split(".", 1)[0]
 # disabled = Use HTTP only in all URLs and mDNS adverts
 # mixed = Use HTTP in all URLs, but additionally advertise an HTTPS endpoint for discovery of this API only
 ENABLE_P2P = _config.get('node_p2p_enable', True)
-OAUTH_MODE = _config.get('oauth_mode', False)
 
 # BYPASS AUTHLIB SECURITY CHECK DUE TO REVERSE PROXY
 environ["AUTHLIB_INSECURE_TRANSPORT"] = "1"

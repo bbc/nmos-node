@@ -23,6 +23,7 @@ from six.moves.urllib.parse import urljoin
 
 from nmoscommon.nmoscommonconfig import config as _config
 from nmoscommon.webapi import WebAPI, route, resource_route, abort
+from nmoscommon.auth.auth_middleware import AuthMiddleware
 
 # Config Parameters
 PROTOCOL = "https" if _config.get('https_mode') == "enabled" else "http"
@@ -49,6 +50,10 @@ class FacadeAPI(WebAPI):
         self.auth_client = None
         if self.auth_registry:
             self.auth_registry.init_app(self.app)
+
+        # Add Auth Middleware
+        oauth_mode = _config.get('oauth_mode', False)
+        self.app.wsgi_app = AuthMiddleware(self.app.wsgi_app, auth_mode=oauth_mode, api_name=NODE_APINAME)
 
     @route('/')
     def root(self):
